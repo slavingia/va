@@ -219,26 +219,27 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=3):
     """Analyze contract text using LLM asynchronously with retries"""
     if pass_number == 1:
         prompt = f"""
-        Analyze this contract text and extract key information. If information is not found, write "Not found".
+        Analyze the following contract text and extract the basic information below. If you can't find specific information, write "Not found".
         
         CONTRACT TEXT:
-        {text[:10000]}
+        {text[:10000]}  # Using first 10000 chars to stay within token limits
         
-        Extract:
+        Please extract the following information:
         1. Contract Number/PIID
-        2. Parent Contract Number
-        3. Contract Description (WHO: vendor, WHAT: specific products/services, WHO: beneficiaries)
+        2. Parent Contract Number (if this is a child contract)
+        3. Contract Description - IMPORTANT: Provide a DETAILED 1-2 sentence description that clearly explains what the contract is for. 
+           Include WHO the vendor is, WHAT specific products or services they provide, and WHO the end recipients or beneficiaries are.
+           For example, instead of "Custom powered wheelchair", write "Contract with XYZ Medical Equipment Provider to supply custom-powered 
+           wheelchairs and related maintenance services to veteran patients at VA medical centers."
         4. Vendor Name
-        5. Total Contract Value (format as $1,234,567.89)
-        6. FY 25 Value (format as $1,234,567.89)
-        7. Remaining Obligations (format as $1,234,567.89)
+        5. Total Contract Value (in USD)
+        6. FY 25 Value (in USD)
+        7. Remaining Obligations (in USD)
         8. Contracting Officer Name
         9. Is this an IDIQ contract? (true/false)
         10. Is this a modification? (true/false)
-        11. First-pass Munchable Status (true/false/N/A)
-        12. First-pass Munchable Reason (brief explanation)
         
-        Format as JSON:
+        PROVIDE YOUR ANALYSIS IN THE FOLLOWING JSON FORMAT:
         {{
             "contract_number": "",
             "parent_contract_number": "",
@@ -249,47 +250,144 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=3):
             "remaining_obligations": "",
             "contracting_officer": "",
             "is_idiq": false,
-            "is_modification": false,
-            "first_pass_munchable": "",
-            "first_pass_reason": ""
+            "is_modification": false
         }}
         """
     else:
         prompt = f"""
-        Based on this contract description, determine if it's munchable:
+        Based on the following contract information, determine if this contract is "munchable" based on these criteria:
         
-        CONTRACT DESCRIPTION:
-        {text[:10000]}
+        CONTRACT INFORMATION:
+        {text[:10000]}  # Using first 10000 chars to stay within token limits
         
-        Rules:
-        - If modification: N/A
-        - If IDIQ:
-          * Medical devices: NOT MUNCHABLE
-          * Recruiting: MUNCHABLE
-          * Other services: Consider termination if not core medical/benefits
-        - Direct patient care: NOT MUNCHABLE
-        - Consultants that can't be insourced: NOT MUNCHABLE
-        - Multiple layers removed from veterans care: MUNCHABLE
-        - DEI initiatives: MUNCHABLE
-        - Services replaceable by W2 employees: MUNCHABLE
+        First, determine if this is a contract modification by looking for keywords like:
+        - "Modification"
+        - "Amendment"
+        - "Change Order"
+        - "Supplemental Agreement"
+        - "Modification No."
+        - "Amendment No."
         
-        NOT MUNCHABLE exceptions:
-        - Medical equipment audits/certifications
-        - Nuclear physics/radiation safety
-        - Medical device safety
-        - Healthcare facility accreditation
-        - Clinical trial audits
-        - Medical billing compliance
-        - Healthcare fraud investigations
-        - Medical records privacy
-        - Healthcare quality assurance
-        - Long-term care facility surveys
+        Then, determine if this is an IDIQ (Indefinite Delivery, Indefinite Quantity) contract by looking for:
+        - "IDIQ" or "Indefinite Delivery/Indefinite Quantity"
+        - "Task Order" or "Delivery Order"
+        - "Multiple Award" or "Single Award"
+        - "Ordering Period"
+        - "Maximum Ordering Value"
         
-        Format as JSON:
+        Also identify any parent contract relationships by looking for:
+        - "Parent Contract" or "Master Contract"
+        - "Call Order" or "Order Under"
+        - "Task Order Under"
+        - "Delivery Order Under"
+        
+        Then, evaluate if this contract is "munchable" based on these criteria:
+        - If this is a contract modification, mark it as "N/A" for munchable status
+        - If this is an IDIQ contract:
+          * For medical devices/equipment: NOT MUNCHABLE
+          * For recruiting/staffing: MUNCHABLE
+          * For other services: Consider termination if not core medical/benefits
+        - Level 0: Direct patient care (e.g., bedside nurse) - NOT MUNCHABLE
+        - Level 1: Necessary consultants that can't be insourced - NOT MUNCHABLE
+        - Level 2+: Multiple layers removed from veterans care - MUNCHABLE
+        - Contracts related to "diversity, equity, and inclusion" (DEI) initiatives - MUNCHABLE
+        - Services that could easily be replaced by in-house W2 employees - MUNCHABLE
+        
+        IMPORTANT EXCEPTIONS - These are NOT MUNCHABLE:
+        - Third-party financial audits and compliance reviews
+        - Medical equipment audits and certifications (e.g., MRI, CT scan, nuclear medicine equipment)
+        - Nuclear physics and radiation safety audits for medical equipment
+        - Medical device safety and compliance audits
+        - Healthcare facility accreditation reviews
+        - Clinical trial audits and monitoring
+        - Medical billing and coding compliance audits
+        - Healthcare fraud and abuse investigations
+        - Medical records privacy and security audits
+        - Healthcare quality assurance reviews
+        - Community Living Center (CLC) surveys and inspections
+        - State Veterans Home surveys and inspections
+        - Long-term care facility quality surveys
+        - Nursing home resident safety and care quality reviews
+        - Assisted living facility compliance surveys
+        - Veteran housing quality and safety inspections
+        - Residential care facility accreditation reviews
+        
+        Key considerations:
+        - Direct patient care involves: physical examinations, medical procedures, medication administration
+        - Distinguish between medical/clinical and psychosocial support
+        - Installation, configuration, or implementation of Electronic Medical Record (EMR) systems or healthcare IT systems directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing.
+        
+        Specific services that should be classified as MUNCHABLE (these are "soft services" or consulting-type services):
+        - Healthcare technology management (HTM) services
+        - Data Commons Software as a Service (SaaS)
+        - Administrative management and consulting services
+        - Data management and analytics services
+        - Product catalog or listing management
+        - Planning and transition support services
+        - Portfolio management services
+        - Operational management review
+        - Technology guides and alerts services
+        - Case management administrative services
+        - Case abstracts, casefinding, follow-up services
+        - Enterprise-level portfolio management
+        - Support for specific initiatives (like PACT Act)
+        - Administrative updates to product information
+        - Research data management platforms or repositories
+        - Drug/pharmaceutical lifecycle management and pricing analysis
+        - Backup Contracting Officer's Representatives (CORs) or administrative oversight roles
+        - Modernization and renovation extensions not directly tied to patient care
+        - DEI (Diversity, Equity, Inclusion) initiatives
+        - Climate & Sustainability programs
+        - Consulting & Research Services
+        - Non-Performing/Non-Essential Contracts
+        - Recruitment Services
+        
+        Important clarifications based on past analysis errors:
+        2. Lifecycle management of drugs/pharmaceuticals IS MUNCHABLE (different from direct supply)
+        3. Backup administrative roles (like alternate CORs) ARE MUNCHABLE as they create duplicative work
+        4. Contract extensions for renovations/modernization ARE MUNCHABLE unless directly tied to patient care
+        
+        Direct patient care that is NOT MUNCHABLE includes:
+        - Conducting physical examinations
+        - Administering medications and treatments
+        - Performing medical procedures and interventions
+        - Monitoring and assessing patient responses
+        - Supply of actual medical products (pharmaceuticals, medical equipment)
+        - Maintenance of critical medical equipment
+        - Custom medical devices (wheelchairs, prosthetics)
+        - Essential therapeutic services with proven efficacy
+        
+        For maintenance contracts, consider whether pricing appears reasonable. If maintenance costs seem excessive, flag them as potentially over-priced despite being necessary.
+        
+        Services that can be easily insourced (MUNCHABLE):
+        - Video production and multimedia services
+        - Customer support/call centers
+        - PowerPoint/presentation creation
+        - Recruiting and outreach services
+        - Public affairs and communications
+        - Administrative support
+        - Basic IT support (non-specialized)
+        - Content creation and writing
+        - Training services (non-specialized)
+        - Event planning and coordination
+        
+        Parent-Child Contract Analysis:
+        - If this is a child contract (has a parent contract):
+          * If the parent contract is NOT MUNCHABLE, this child contract should also be NOT MUNCHABLE
+          * If the parent contract is MUNCHABLE, evaluate this child contract independently
+        - If this is a parent contract:
+          * Consider the overall scope and purpose of the parent contract
+          * If it's a master contract for essential services, it may be NOT MUNCHABLE even if individual task orders could be
+          * If it's a master contract for administrative or support services, it may be MUNCHABLE
+        
+        PROVIDE YOUR ANALYSIS IN THE FOLLOWING JSON FORMAT:
         {{
             "contract_number": "The contract number from the text",
-            "second_pass_munchable": "true/false/N/A",
-            "second_pass_reason": "Brief explanation"
+            "munchable": "true" if munchable, "false" if not munchable, "N/A" if modification,
+            "munchable_reason": "A clear explanation of why this contract is munchable or not",
+            "parent_contract_number": "The parent contract number if found, otherwise empty string",
+            "is_child_contract": true/false,
+            "parent_munchable_status": "The munchable status of the parent contract if known, otherwise empty string"
         }}
         """
     
@@ -299,25 +397,25 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=3):
             response = await client.chat.completions.create(
                 model="o3-mini",
                 messages=[
-                    {"role": "system", "content": "You are an AI assistant that analyzes government contracts. Always provide detailed descriptions explaining WHO the contract is with, WHAT specific services/products are provided, and WHO benefits from these services. Format all monetary values as $1,234,567.89 with exact cents. For munchable analysis, be precise and concise in your reasoning."},
+                    {"role": "system", "content": "You are an AI assistant that analyzes government contracts. Always provide comprehensive few-sentence descriptions that explain WHO the contract is with, WHAT specific services/products are provided, and WHO benefits from these services. Remember that contracts for EMR systems and healthcare IT infrastructure directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing."},
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"},
-                timeout=30
+                timeout=30  # 30 second timeout
             )
             
             result = json.loads(response.choices[0].message.content)
             if pass_number == 1:
                 print(f"First pass analysis completed. Contract number: {result.get('contract_number', 'Not found')}")
             else:
-                print(f"Second pass analysis completed. Munchable status: {result.get('second_pass_munchable', 'Error')}")
+                print(f"Second pass analysis completed. Munchable status: {result.get('munchable', 'Error')}")
             return result
             
         except asyncio.TimeoutError:
             print(f"Timeout on attempt {attempt + 1}/{max_retries}")
             if attempt == max_retries - 1:
                 raise
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
         except Exception as e:
             print(f"Error analyzing contract on attempt {attempt + 1}/{max_retries}: {e}")
             if attempt == max_retries - 1:
@@ -332,17 +430,15 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=3):
                         "remaining_obligations": "Error",
                         "contracting_officer": "Error",
                         "is_idiq": False,
-                        "is_modification": False,
-                        "first_pass_munchable": "Error",
-                        "first_pass_reason": "Error in analysis"
+                        "is_modification": False
                     }
                 else:
                     return {
                         "contract_number": "Error",
-                        "second_pass_munchable": "Error",
-                        "second_pass_reason": "Error in analysis"
+                        "munchable": "Error",
+                        "munchable_reason": "Error in analysis"
                     }
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
 
 async def extract_text_from_pdf_async(pdf_path):
     """Extract text from a PDF file asynchronously using pymupdf"""
@@ -422,30 +518,26 @@ async def process_contract_batch(contract_batch, pass_number=1):
                 processed_files.append(pdf_path)
                 continue
             
-            # For second pass, include description and related contract descriptions
+            # For second pass, include parent and child contract text if available
             if pass_number == 2:
                 # Find the contract number for this PDF
                 current_contract = next((r for r in contract_batch if r.get('file_path') == pdf_path), None)
                 if current_contract:
                     contract_number = current_contract.get('contract_number')
-                    description = current_contract.get('description', '')
-                    parent_number = current_contract.get('parent_contract_number', '')
+                    parent_number = current_contract.get('parent_contract_number')
                     
-                    # Build context text with current contract description
-                    text = f"Current Contract Description: {description}\n\n"
+                    # Add parent contract text if available
+                    if parent_number and parent_number in contract_texts:
+                        text += f"\n\nPARENT CONTRACT TEXT:\n{contract_texts[parent_number]}"
                     
-                    # Add parent contract description if available
-                    if parent_number:
-                        parent_contract = next((r for r in contract_batch if r.get('contract_number') == parent_number), None)
-                        if parent_contract:
-                            text += f"Parent Contract Description: {parent_contract.get('description', '')}\n\n"
-                    
-                    # Add child contract descriptions if any
+                    # Find and add child contract texts if any
                     child_contracts = [r for r in contract_batch if r.get('parent_contract_number') == contract_number]
                     if child_contracts:
-                        text += "Child Contract Descriptions:\n"
+                        text += "\n\nCHILD CONTRACT TEXTS:"
                         for child in child_contracts:
-                            text += f"- {child.get('description', '')}\n"
+                            child_number = child.get('contract_number')
+                            if child_number in contract_texts:
+                                text += f"\n\nChild Contract {child_number}:\n{contract_texts[child_number]}"
             
             # Create task for contract analysis
             task = asyncio.create_task(analyze_contract_async(text, None, pass_number))
@@ -468,7 +560,7 @@ async def process_contract_batch(contract_batch, pass_number=1):
                     processed_files.append(pdf_path)
                     continue
                 
-                # Add to results with all columns
+                # Add to results with explicit munchable and reason columns
                 results.append({
                     'contract_number': contract_number,
                     'parent_contract_number': analysis.get('parent_contract_number', 'Not found'),
@@ -481,10 +573,8 @@ async def process_contract_batch(contract_batch, pass_number=1):
                     'is_idiq': analysis.get('is_idiq', False),
                     'is_modification': analysis.get('is_modification', False),
                     'file_path': pdf_path,
-                    'first_pass_munchable': analysis.get('first_pass_munchable', ''),
-                    'first_pass_reason': analysis.get('first_pass_reason', ''),
-                    'second_pass_munchable': '',  # Will be filled in second pass
-                    'second_pass_reason': ''  # Will be filled in second pass
+                    'munchable': '',  # Explicitly add blank munchable column
+                    'reason': ''  # Explicitly add blank reason column
                 })
                 # Copy PDF to reviewed folder with contract number as the filename
                 if contract_number not in ["Not found", "Error"]:
@@ -492,17 +582,17 @@ async def process_contract_batch(contract_batch, pass_number=1):
             else:
                 # Second pass - update munchable status
                 contract_number = analysis.get('contract_number', 'Not found')
-                munchable_status = analysis.get('second_pass_munchable', 'Error')
-                munchable_reason = analysis.get('second_pass_reason', '')
+                munchable_status = analysis.get('munchable', 'Error')
+                munchable_reason = analysis.get('munchable_reason', '')
                 
                 # Find and update the corresponding result from first pass
                 for result in contract_batch:
                     if result.get('contract_number') == contract_number:
-                        result['second_pass_munchable'] = str(munchable_status).lower()  # Convert to lowercase string
-                        result['second_pass_reason'] = munchable_reason if munchable_reason and munchable_reason != 'nan' else 'No reason provided'
+                        result['munchable'] = str(munchable_status).lower()  # Convert to lowercase string
+                        result['reason'] = munchable_reason if munchable_reason and munchable_reason != 'nan' else 'No reason provided'
                         results.append(result)
-                        print(f"Updated second pass munchable status for contract {contract_number}: {munchable_status}")
-                        print(f"Reason: {result['second_pass_reason']}")
+                        print(f"Updated munchable status for contract {contract_number}: {munchable_status}")
+                        print(f"Reason: {result['reason']}")
                         break
             
             # Mark as processed
@@ -555,26 +645,18 @@ async def main_async():
             print("Loading existing results for second pass analysis...")
             existing_df = pd.read_csv(output_csv)
             
-            # Add new columns if they don't exist
-            if 'first_pass_munchable' not in existing_df.columns:
-                existing_df['first_pass_munchable'] = ''
-                print("Added first_pass_munchable column to existing results")
+            # Add munchable and reason columns if they don't exist
+            if 'munchable' not in existing_df.columns:
+                existing_df['munchable'] = ''
+                print("Added munchable column to existing results")
             
-            if 'first_pass_reason' not in existing_df.columns:
-                existing_df['first_pass_reason'] = ''
-                print("Added first_pass_reason column to existing results")
-            
-            if 'second_pass_munchable' not in existing_df.columns:
-                existing_df['second_pass_munchable'] = ''
-                print("Added second_pass_munchable column to existing results")
-            
-            if 'second_pass_reason' not in existing_df.columns:
-                existing_df['second_pass_reason'] = ''
-                print("Added second_pass_reason column to existing results")
+            if 'reason' not in existing_df.columns:
+                existing_df['reason'] = ''
+                print("Added reason column to existing results")
                 
             # Save the updated DataFrame with the new columns
             existing_df.to_csv(output_csv, index=False)
-            print("Updated CSV with new munchable columns")
+            print("Updated CSV with munchable and reason columns")
             
             all_results = existing_df.to_dict('records')
             
@@ -589,6 +671,13 @@ async def main_async():
             if args.test_mode:
                 all_results = all_results[:3]
                 print(f"Test mode: Processing {len(all_results)} existing results")
+                
+                # Ensure the records have munchable and reason fields for test mode
+                for result in all_results:
+                    if 'munchable' not in result:
+                        result['munchable'] = ''
+                    if 'reason' not in result:
+                        result['reason'] = ''
         else:
             print("No existing results found for second pass analysis.")
             return
@@ -622,26 +711,18 @@ async def main_async():
                     existing_df = pd.read_csv(output_csv)
                     
                     # Ensure the required columns exist in existing DataFrame
-                    if 'first_pass_munchable' not in existing_df.columns:
-                        existing_df['first_pass_munchable'] = ''
-                    if 'first_pass_reason' not in existing_df.columns:
-                        existing_df['first_pass_reason'] = ''
-                    if 'second_pass_munchable' not in existing_df.columns:
-                        existing_df['second_pass_munchable'] = ''
-                    if 'second_pass_reason' not in existing_df.columns:
-                        existing_df['second_pass_reason'] = ''
+                    if 'munchable' not in existing_df.columns:
+                        existing_df['munchable'] = ''
+                    if 'reason' not in existing_df.columns:
+                        existing_df['reason'] = ''
                     
                     new_df = pd.DataFrame(batch_results)
                     
-                    # Ensure new DataFrame has all required columns
-                    if 'first_pass_munchable' not in new_df.columns:
-                        new_df['first_pass_munchable'] = ''
-                    if 'first_pass_reason' not in new_df.columns:
-                        new_df['first_pass_reason'] = ''
-                    if 'second_pass_munchable' not in new_df.columns:
-                        new_df['second_pass_munchable'] = ''
-                    if 'second_pass_reason' not in new_df.columns:
-                        new_df['second_pass_reason'] = ''
+                    # Ensure new DataFrame has munchable and reason columns
+                    if 'munchable' not in new_df.columns:
+                        new_df['munchable'] = ''
+                    if 'reason' not in new_df.columns:
+                        new_df['reason'] = ''
                     
                     combined_df = pd.concat([existing_df, new_df], ignore_index=True)
                     combined_df.to_csv(output_csv, index=False)
@@ -651,15 +732,11 @@ async def main_async():
                     print(f"Creating new analysis CSV with first pass batch results: {output_csv}")
                     df = pd.DataFrame(batch_results)
                     
-                    # Ensure DataFrame has all required columns
-                    if 'first_pass_munchable' not in df.columns:
-                        df['first_pass_munchable'] = ''
-                    if 'first_pass_reason' not in df.columns:
-                        df['first_pass_reason'] = ''
-                    if 'second_pass_munchable' not in df.columns:
-                        df['second_pass_munchable'] = ''
-                    if 'second_pass_reason' not in df.columns:
-                        df['second_pass_reason'] = ''
+                    # Ensure DataFrame has munchable and reason columns
+                    if 'munchable' not in df.columns:
+                        df['munchable'] = ''
+                    if 'reason' not in df.columns:
+                        df['reason'] = ''
                     
                     df.to_csv(output_csv, index=False)
                     print(f"Created {output_csv} with {len(df)} records")
@@ -679,16 +756,12 @@ async def main_async():
         second_pass_batch = all_results[i:i + batch_size]
         print(f"Processing second pass batch {i//batch_size + 1}/{(len(all_results) + batch_size - 1)//batch_size}")
         
-        # Ensure all records in the batch have all required fields
+        # Ensure all records in the batch have munchable and reason fields
         for result in second_pass_batch:
-            if 'first_pass_munchable' not in result:
-                result['first_pass_munchable'] = ''
-            if 'first_pass_reason' not in result:
-                result['first_pass_reason'] = ''
-            if 'second_pass_munchable' not in result:
-                result['second_pass_munchable'] = ''
-            if 'second_pass_reason' not in result:
-                result['second_pass_reason'] = ''
+            if 'munchable' not in result:
+                result['munchable'] = ''
+            if 'reason' not in result:
+                result['reason'] = ''
         
         # Process batch for munchable analysis
         munchable_results = await process_contract_batch(second_pass_batch, pass_number=2)
@@ -698,10 +771,10 @@ async def main_async():
             contract_num = result.get('contract_number')
             munchable_result = next((r for r in munchable_results if r.get('contract_number') == contract_num), None)
             if munchable_result:
-                result['second_pass_munchable'] = munchable_result.get('second_pass_munchable', 'Error')
-                result['second_pass_reason'] = munchable_result.get('second_pass_reason', '')
-                print(f"Updated second pass munchable status for contract {contract_num}: {result['second_pass_munchable']}")
-                print(f"Reason: {result['second_pass_reason']}")
+                result['munchable'] = munchable_result.get('munchable', 'Error')
+                result['reason'] = munchable_result.get('reason', '')
+                print(f"Updated munchable status for contract {contract_num}: {result['munchable']}")
+                print(f"Reason: {result['reason']}")
         
         # Save second pass batch results
         if os.path.exists(output_csv):
@@ -709,26 +782,17 @@ async def main_async():
             print(f"Updating analysis CSV with second pass batch results: {output_csv}")
             existing_df = pd.read_csv(output_csv)
             
-            # Ensure all required columns exist in the DataFrame
-            if 'first_pass_munchable' not in existing_df.columns:
-                existing_df['first_pass_munchable'] = ''
-                print("Added first_pass_munchable column to existing results")
+            # Ensure munchable and reason columns exist in the DataFrame
+            if 'munchable' not in existing_df.columns:
+                existing_df['munchable'] = ''
+                print("Added munchable column to existing results")
                 
-            if 'first_pass_reason' not in existing_df.columns:
-                existing_df['first_pass_reason'] = ''
-                print("Added first_pass_reason column to existing results")
-                
-            if 'second_pass_munchable' not in existing_df.columns:
-                existing_df['second_pass_munchable'] = ''
-                print("Added second_pass_munchable column to existing results")
-                
-            if 'second_pass_reason' not in existing_df.columns:
-                existing_df['second_pass_reason'] = ''
-                print("Added second_pass_reason column to existing results")
+            if 'reason' not in existing_df.columns:
+                existing_df['reason'] = ''
+                print("Added reason column to existing results")
             
-            # Ensure reason columns are string type
-            existing_df['first_pass_reason'] = existing_df['first_pass_reason'].fillna('')
-            existing_df['second_pass_reason'] = existing_df['second_pass_reason'].fillna('')
+            # Ensure reason column is string type
+            existing_df['reason'] = existing_df['reason'].fillna('')
             
             # Create a dictionary mapping contract numbers to their updated data
             updates = {r['contract_number']: r for r in second_pass_batch if r['contract_number'] != 'Not found' and r['contract_number'] != 'Error'}
@@ -737,30 +801,22 @@ async def main_async():
             for index, row in existing_df.iterrows():
                 contract_num = row['contract_number']
                 if contract_num in updates:
-                    existing_df.at[index, 'first_pass_munchable'] = updates[contract_num]['first_pass_munchable']
-                    existing_df.at[index, 'first_pass_reason'] = str(updates[contract_num]['first_pass_reason']).replace('nan', '')
-                    existing_df.at[index, 'second_pass_munchable'] = updates[contract_num]['second_pass_munchable']
-                    existing_df.at[index, 'second_pass_reason'] = str(updates[contract_num]['second_pass_reason']).replace('nan', '')
+                    existing_df.at[index, 'munchable'] = updates[contract_num]['munchable']
+                    existing_df.at[index, 'reason'] = str(updates[contract_num]['reason']).replace('nan', '')
             
-            # Sort by second pass munchable status if the column exists
-            if 'second_pass_munchable' in existing_df.columns:
-                existing_df = existing_df.sort_values(by='second_pass_munchable', key=lambda x: x.map({'true': 0, 'false': 1, 'n/a': 2, 'error': 3, '': 4}))
+            # Sort by munchable status if the column exists
+            if 'munchable' in existing_df.columns:
+                existing_df = existing_df.sort_values(by='munchable', key=lambda x: x.map({'true': 0, 'false': 1, 'n/a': 2, 'error': 3, '': 4}))
             
             existing_df.to_csv(output_csv, index=False)
             print(f"Updated {output_csv} with second pass batch results")
             
             # Validate that munchable status was updated
             final_df = pd.read_csv(output_csv)
-            final_df['first_pass_reason'] = final_df['first_pass_reason'].fillna('')
-            final_df['second_pass_reason'] = final_df['second_pass_reason'].fillna('')
-            
-            first_pass_counts = final_df['first_pass_munchable'].value_counts()
-            second_pass_counts = final_df['second_pass_munchable'].value_counts()
-            
-            print("\nFirst Pass Munchable Status Distribution:")
-            print(first_pass_counts)
-            print("\nSecond Pass Munchable Status Distribution:")
-            print(second_pass_counts)
+            final_df['reason'] = final_df['reason'].fillna('')  # Replace NaN with empty string for display
+            munchable_counts = final_df['munchable'].value_counts()
+            print("\nMunchable Status Distribution:")
+            print(munchable_counts)
             
             # Print detailed test results
             if args.test_mode:
@@ -769,10 +825,8 @@ async def main_async():
                 print("\nContract Details:")
                 for _, row in test_results.iterrows():
                     print(f"\nContract Number: {row['contract_number']}")
-                    print(f"First Pass Munchable: {row['first_pass_munchable']}")
-                    print(f"First Pass Reason: {row['first_pass_reason'] if row['first_pass_reason'] and row['first_pass_reason'] != 'nan' else 'No reason provided'}")
-                    print(f"Second Pass Munchable: {row['second_pass_munchable']}")
-                    print(f"Second Pass Reason: {row['second_pass_reason'] if row['second_pass_reason'] and row['second_pass_reason'] != 'nan' else 'No reason provided'}")
+                    print(f"Munchable: {row['munchable']}")
+                    print(f"Reason: {row['reason'] if row['reason'] and row['reason'] != 'nan' else 'No reason provided'}")
         
         # In test mode, only process first batch
         if args.test_mode:

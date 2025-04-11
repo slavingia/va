@@ -275,7 +275,10 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
         Extract:
         1. Contract Number/PIID
         2. Parent Contract Number
-        3. Contract Description (WHO: vendor, WHAT: specific products/services, WHO: beneficiaries)
+        3. Contract Description - IMPORTANT: Provide a DETAILED 1-2 sentence description that clearly explains what the contract is for. 
+           Include WHO the vendor is, WHAT specific products or services they provide, and WHO the end recipients or beneficiaries are.
+           For example, instead of "Custom powered wheelchair", write "Contract with XYZ Medical Equipment Provider to supply custom-powered 
+           wheelchairs and related maintenance services to veteran patients at VA medical centers."
         4. Vendor Name
         5. Total Contract Value (format as $1,234,567.89)
         6. FY 25 Value (format as $1,234,567.89)
@@ -515,7 +518,7 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
                 response = await client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
-                        {"role": "system", "content": "You are an AI assistant that analyzes government contracts. Always provide detailed descriptions explaining WHO the contract is with, WHAT specific services/products are provided, and WHO benefits from these services. Format all monetary values as $1,234,567.89 with exact cents. For munchable analysis, be precise and concise in your reasoning."},
+                        {"role": "system", "content": "You are an AI assistant that analyzes government contracts. Always provide comprehensive few-sentence descriptions that explain WHO the contract is with, WHAT specific services/products are provided, and WHO benefits from these services. Remember that contracts for EMR systems and healthcare IT infrastructure directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing."},
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"},

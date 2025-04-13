@@ -2,14 +2,14 @@
 
 These are tools I have written to do my work more effectively at the VA.
 
-## Usage: process_contracts_v3.py
+## Usage: process_contracts.py
 
 This script processes PDF contracts found in the `azure_pdfs` directory, extracts text, analyzes them using an LLM, and outputs the results to `contract_analysis.csv`.
 
 **Basic Usage:**
 
 ```bash
-python process_contracts_v3.py
+python process_contracts.py
 ```
 
 **Environment Variables:**
@@ -31,13 +31,13 @@ Make sure you have a `.env.local` file in the same directory with the necessary 
 Run in smart mode with a batch size of 10:
 
 ```bash
-python process_contracts_v3.py --smart-mode --batch-size 10
+python process_contracts.py --smart-mode --batch-size 10
 ```
 
 Run only the second pass analysis:
 
 ```bash
-python process_contracts_v3.py --second-pass-only
+python process_contracts.py --second-pass-only
 ```
 
 ## Usage: analyze_contracts.py

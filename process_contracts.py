@@ -262,10 +262,104 @@ def copy_pdf_to_reviewed_folder(pdf_path, contract_number):
         print(f"Error copying {pdf_path} to {dest_file}: {e}")
         return False
 
+# Base prompt content shared between passes
+BASE_PROMPT_RULES = """
+Rules:
+- If modification: N/A
+- If IDIQ:
+  * Medical devices: NOT MUNCHABLE
+  * Recruiting: MUNCHABLE
+  * Other services: Consider termination if not core medical/benefits
+- Direct patient care: NOT MUNCHABLE
+- Consultants that can't be insourced: NOT MUNCHABLE
+- Multiple layers removed from veterans care: MUNCHABLE
+- DEI initiatives: MUNCHABLE
+- Services replaceable by W2 employees: MUNCHABLE
+
+IMPORTANT EXCEPTIONS - These are NOT MUNCHABLE:
+- Third-party financial audits and compliance reviews
+- Medical equipment audits and certifications (e.g., MRI, CT scan, nuclear medicine equipment)
+- Nuclear physics and radiation safety audits for medical equipment
+- Medical device safety and compliance audits
+- Healthcare facility accreditation reviews
+- Clinical trial audits and monitoring
+- Medical billing and coding compliance audits
+- Healthcare fraud and abuse investigations
+- Medical records privacy and security audits
+- Healthcare quality assurance reviews
+- Community Living Center (CLC) surveys and inspections
+- State Veterans Home surveys and inspections
+- Long-term care facility quality surveys
+- Nursing home resident safety and care quality reviews
+- Assisted living facility compliance surveys
+- Veteran housing quality and safety inspections
+- Residential care facility accreditation reviews
+
+Key considerations:
+- Direct patient care involves: physical examinations, medical procedures, medication administration
+- Distinguish between medical/clinical and psychosocial support
+- Installation, configuration, or implementation of Electronic Medical Record (EMR) systems or healthcare IT systems directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing.
+
+Specific services that should be classified as MUNCHABLE (these are "soft services" or consulting-type services):
+- Healthcare technology management (HTM) services
+- Data Commons Software as a Service (SaaS)
+- Administrative management and consulting services
+- Data management and analytics services
+- Product catalog or listing management
+- Planning and transition support services
+- Portfolio management services
+- Operational management review
+- Technology guides and alerts services
+- Case management administrative services
+- Case abstracts, casefinding, follow-up services
+- Enterprise-level portfolio management
+- Support for specific initiatives (like PACT Act)
+- Administrative updates to product information
+- Research data management platforms or repositories
+- Drug/pharmaceutical lifecycle management and pricing analysis
+- Backup Contracting Officer's Representatives (CORs) or administrative oversight roles
+- Modernization and renovation extensions not directly tied to patient care
+- DEI (Diversity, Equity, Inclusion) initiatives
+- Climate & Sustainability programs
+- Consulting & Research Services
+- Non-Performing/Non-Essential Contracts
+- Recruitment Services
+
+Important clarifications based on past analysis errors:
+2. Lifecycle management of drugs/pharmaceuticals IS MUNCHABLE (different from direct supply)
+3. Backup administrative roles (like alternate CORs) ARE MUNCHABLE as they create duplicative work
+4. Contract extensions for renovations/modernization ARE MUNCHABLE unless directly tied to patient care
+
+Direct patient care that is NOT MUNCHABLE includes:
+- Conducting physical examinations
+- Administering medications and treatments
+- Performing medical procedures and interventions
+- Monitoring and assessing patient responses
+- Supply of actual medical products (pharmaceuticals, medical equipment)
+- Maintenance of critical medical equipment
+- Custom medical devices (wheelchairs, prosthetics)
+- Essential therapeutic services with proven efficacy
+
+For maintenance contracts, consider whether pricing appears reasonable. If maintenance costs seem excessive, flag them as potentially over-priced despite being necessary.
+
+Services that can be easily insourced (MUNCHABLE):
+- Video production and multimedia services
+- Customer support/call centers
+- PowerPoint/presentation creation
+- Recruiting and outreach services
+- Public affairs and communications
+- Administrative support
+- Basic IT support (non-specialized)
+- Content creation and writing
+- Training services (non-specialized)
+- Event planning and coordination
+"""
+
 async def analyze_contract_async(text, client, model_name, pass_number=1, max_retries=5):
     """Analyze contract text using LLM asynchronously with retries"""
+
     if pass_number == 1:
-        prompt = f"""
+        prompt_intro = f"""
         Analyze this contract text and extract key information. If information is not found, write "Not found".
 
         CONTRACT TEXT:
@@ -287,99 +381,10 @@ async def analyze_contract_async(text, client, model_name, pass_number=1, max_re
         10. Is this a modification? (true/false)
         11. First-pass Munchable Status (true/false/N/A)
         12. First-pass Munchable Reason (brief explanation)
-
-                Rules:
-        - If modification: N/A
-        - If IDIQ:
-          * Medical devices: NOT MUNCHABLE
-          * Recruiting: MUNCHABLE
-          * Other services: Consider termination if not core medical/benefits
-        - Direct patient care: NOT MUNCHABLE
-        - Consultants that can't be insourced: NOT MUNCHABLE
-        - Multiple layers removed from veterans care: MUNCHABLE
-        - DEI initiatives: MUNCHABLE
-        - Services replaceable by W2 employees: MUNCHABLE
-
-        IMPORTANT EXCEPTIONS - These are NOT MUNCHABLE:
-        - Third-party financial audits and compliance reviews
-        - Medical equipment audits and certifications (e.g., MRI, CT scan, nuclear medicine equipment)
-        - Nuclear physics and radiation safety audits for medical equipment
-        - Medical device safety and compliance audits
-        - Healthcare facility accreditation reviews
-        - Clinical trial audits and monitoring
-        - Medical billing and coding compliance audits
-        - Healthcare fraud and abuse investigations
-        - Medical records privacy and security audits
-        - Healthcare quality assurance reviews
-        - Community Living Center (CLC) surveys and inspections
-        - State Veterans Home surveys and inspections
-        - Long-term care facility quality surveys
-        - Nursing home resident safety and care quality reviews
-        - Assisted living facility compliance surveys
-        - Veteran housing quality and safety inspections
-        - Residential care facility accreditation reviews
-
-        Key considerations:
-        - Direct patient care involves: physical examinations, medical procedures, medication administration
-        - Distinguish between medical/clinical and psychosocial support
-        - Installation, configuration, or implementation of Electronic Medical Record (EMR) systems or healthcare IT systems directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing.
-
-        Specific services that should be classified as MUNCHABLE (these are "soft services" or consulting-type services):
-        - Healthcare technology management (HTM) services
-        - Data Commons Software as a Service (SaaS)
-        - Administrative management and consulting services
-        - Data management and analytics services
-        - Product catalog or listing management
-        - Planning and transition support services
-        - Portfolio management services
-        - Operational management review
-        - Technology guides and alerts services
-        - Case management administrative services
-        - Case abstracts, casefinding, follow-up services
-        - Enterprise-level portfolio management
-        - Support for specific initiatives (like PACT Act)
-        - Administrative updates to product information
-        - Research data management platforms or repositories
-        - Drug/pharmaceutical lifecycle management and pricing analysis
-        - Backup Contracting Officer's Representatives (CORs) or administrative oversight roles
-        - Modernization and renovation extensions not directly tied to patient care
-        - DEI (Diversity, Equity, Inclusion) initiatives
-        - Climate & Sustainability programs
-        - Consulting & Research Services
-        - Non-Performing/Non-Essential Contracts
-        - Recruitment Services
-
-        Important clarifications based on past analysis errors:
-        2. Lifecycle management of drugs/pharmaceuticals IS MUNCHABLE (different from direct supply)
-        3. Backup administrative roles (like alternate CORs) ARE MUNCHABLE as they create duplicative work
-        4. Contract extensions for renovations/modernization ARE MUNCHABLE unless directly tied to patient care
-
-        Direct patient care that is NOT MUNCHABLE includes:
-        - Conducting physical examinations
-        - Administering medications and treatments
-        - Performing medical procedures and interventions
-        - Monitoring and assessing patient responses
-        - Supply of actual medical products (pharmaceuticals, medical equipment)
-        - Maintenance of critical medical equipment
-        - Custom medical devices (wheelchairs, prosthetics)
-        - Essential therapeutic services with proven efficacy
-
-        For maintenance contracts, consider whether pricing appears reasonable. If maintenance costs seem excessive, flag them as potentially over-priced despite being necessary.
-
-        Services that can be easily insourced (MUNCHABLE):
-        - Video production and multimedia services
-        - Customer support/call centers
-        - PowerPoint/presentation creation
-        - Recruiting and outreach services
-        - Public affairs and communications
-        - Administrative support
-        - Basic IT support (non-specialized)
-        - Content creation and writing
-        - Training services (non-specialized)
-        - Event planning and coordination
-
+        """
+        prompt_format = """
         Format as JSON:
-        {{
+        {
             "contract_number": "",
             "parent_contract_number": "",
             "description": "",
@@ -392,105 +397,17 @@ async def analyze_contract_async(text, client, model_name, pass_number=1, max_re
             "is_modification": false,
             "first_pass_munchable": "",
             "first_pass_reason": ""
-        }}
+        }
         """
-    else:
-        prompt = f"""
-        Based on this contract description, determine if it's munchable:
+        prompt_rules = BASE_PROMPT_RULES
+    else: # pass_number == 2
+        prompt_intro = f"""
+        Based on this contract description and context, determine if it's munchable:
 
-        CONTRACT DESCRIPTION:
+        CONTRACT CONTEXT:
         {text[:10000]}
-
-        Rules:
-        - If modification: N/A
-        - If IDIQ:
-          * Medical devices: NOT MUNCHABLE
-          * Recruiting: MUNCHABLE
-          * Other services: Consider termination if not core medical/benefits
-        - Direct patient care: NOT MUNCHABLE
-        - Consultants that can't be insourced: NOT MUNCHABLE
-        - Multiple layers removed from veterans care: MUNCHABLE
-        - DEI initiatives: MUNCHABLE
-        - Services replaceable by W2 employees: MUNCHABLE
-
-        IMPORTANT EXCEPTIONS - These are NOT MUNCHABLE:
-        - Third-party financial audits and compliance reviews
-        - Medical equipment audits and certifications (e.g., MRI, CT scan, nuclear medicine equipment)
-        - Nuclear physics and radiation safety audits for medical equipment
-        - Medical device safety and compliance audits
-        - Healthcare facility accreditation reviews
-        - Clinical trial audits and monitoring
-        - Medical billing and coding compliance audits
-        - Healthcare fraud and abuse investigations
-        - Medical records privacy and security audits
-        - Healthcare quality assurance reviews
-        - Community Living Center (CLC) surveys and inspections
-        - State Veterans Home surveys and inspections
-        - Long-term care facility quality surveys
-        - Nursing home resident safety and care quality reviews
-        - Assisted living facility compliance surveys
-        - Veteran housing quality and safety inspections
-        - Residential care facility accreditation reviews
-
-        Key considerations:
-        - Direct patient care involves: physical examinations, medical procedures, medication administration
-        - Distinguish between medical/clinical and psychosocial support
-        - Installation, configuration, or implementation of Electronic Medical Record (EMR) systems or healthcare IT systems directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing.
-
-        Specific services that should be classified as MUNCHABLE (these are "soft services" or consulting-type services):
-        - Healthcare technology management (HTM) services
-        - Data Commons Software as a Service (SaaS)
-        - Administrative management and consulting services
-        - Data management and analytics services
-        - Product catalog or listing management
-        - Planning and transition support services
-        - Portfolio management services
-        - Operational management review
-        - Technology guides and alerts services
-        - Case management administrative services
-        - Case abstracts, casefinding, follow-up services
-        - Enterprise-level portfolio management
-        - Support for specific initiatives (like PACT Act)
-        - Administrative updates to product information
-        - Research data management platforms or repositories
-        - Drug/pharmaceutical lifecycle management and pricing analysis
-        - Backup Contracting Officer's Representatives (CORs) or administrative oversight roles
-        - Modernization and renovation extensions not directly tied to patient care
-        - DEI (Diversity, Equity, Inclusion) initiatives
-        - Climate & Sustainability programs
-        - Consulting & Research Services
-        - Non-Performing/Non-Essential Contracts
-        - Recruitment Services
-
-        Important clarifications based on past analysis errors:
-        2. Lifecycle management of drugs/pharmaceuticals IS MUNCHABLE (different from direct supply)
-        3. Backup administrative roles (like alternate CORs) ARE MUNCHABLE as they create duplicative work
-        4. Contract extensions for renovations/modernization ARE MUNCHABLE unless directly tied to patient care
-
-        Direct patient care that is NOT MUNCHABLE includes:
-        - Conducting physical examinations
-        - Administering medications and treatments
-        - Performing medical procedures and interventions
-        - Monitoring and assessing patient responses
-        - Supply of actual medical products (pharmaceuticals, medical equipment)
-        - Maintenance of critical medical equipment
-        - Custom medical devices (wheelchairs, prosthetics)
-        - Essential therapeutic services with proven efficacy
-
-        For maintenance contracts, consider whether pricing appears reasonable. If maintenance costs seem excessive, flag them as potentially over-priced despite being necessary.
-
-        Services that can be easily insourced (MUNCHABLE):
-        - Video production and multimedia services
-        - Customer support/call centers
-        - PowerPoint/presentation creation
-        - Recruiting and outreach services
-        - Public affairs and communications
-        - Administrative support
-        - Basic IT support (non-specialized)
-        - Content creation and writing
-        - Training services (non-specialized)
-        - Event planning and coordination
-
+        """
+        prompt_rules = BASE_PROMPT_RULES + """
         Parent-Child Contract Analysis:
         - If this is a child contract (has a parent contract):
           * If the parent contract is NOT MUNCHABLE, this child contract should also be NOT MUNCHABLE
@@ -499,14 +416,17 @@ async def analyze_contract_async(text, client, model_name, pass_number=1, max_re
           * Consider the overall scope and purpose of the parent contract
           * If it's a master contract for essential services, it may be NOT MUNCHABLE even if individual task orders could be
           * If it's a master contract for administrative or support services, it may be MUNCHABLE
-
+        """
+        prompt_format = """
         Format as JSON:
-        {{
-            "contract_number": "The contract number from the text",
+        {
+            "contract_number": "The contract number from the text, if available",
             "second_pass_munchable": "true/false/N/A",
             "second_pass_reason": "Brief explanation"
-        }}
+        }
         """
+
+    prompt = prompt_intro + prompt_rules + prompt_format
 
     for attempt in range(max_retries):
         try:

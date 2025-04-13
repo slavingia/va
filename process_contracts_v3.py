@@ -10,7 +10,7 @@ import aiohttp
 from datetime import datetime
 import time
 import PyPDF2
-from openai import AsyncAzureOpenAI, RateLimitError
+from openai import AsyncAzureOpenAI, RateLimitError, AsyncOpenAI
 import pandas as pd
 from dotenv import load_dotenv
 import fitz  # pip install pymupdf
@@ -20,9 +20,12 @@ import re
 
 # Load environment variables
 load_dotenv('.env.local')
-openai_api_key = os.getenv('openai_api_key')
-if not openai_api_key:
-    raise ValueError("OpenAI API key not found in environment variables")
+openai_api_key_azure = os.getenv('openai_api_key') # Renamed for clarity
+openai_api_key_smart = os.getenv('openai_api_key_smart') # New key for smart mode
+
+# Initial check for at least one key
+if not openai_api_key_azure and not openai_api_key_smart:
+    raise ValueError("At least one OpenAI API key (openai_api_key or openai_api_key_smart) must be found in environment variables")
 
 # Try to install pycryptodome if not available
 try:
@@ -36,14 +39,14 @@ except ImportError:
 # Add a rate limiter class to handle staggered requests
 class StaggeredRateLimiter:
     """Rate limiter that staggers requests over time to avoid rate limit errors"""
-    
+
     def __init__(self, requests_per_minute=40, max_concurrent=5):
         self.requests_per_minute = requests_per_minute
         self.min_interval = 60.0 / requests_per_minute  # Minimum seconds between requests
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.last_request_time = 0
         self.lock = asyncio.Lock()
-    
+
     async def acquire(self):
         """Acquire the semaphore with rate limiting"""
         await self.semaphore.acquire()
@@ -51,24 +54,24 @@ class StaggeredRateLimiter:
             # Calculate time since last request
             now = time.time()
             time_since_last = now - self.last_request_time
-            
+
             # If we've made a request too recently, wait
             if time_since_last < self.min_interval:
                 wait_time = self.min_interval - time_since_last
                 # Add a small random jitter to avoid request bunching
                 wait_time += random.uniform(0, 0.5)
                 await asyncio.sleep(wait_time)
-            
+
             self.last_request_time = time.time()
-    
+
     def release(self):
         """Release the semaphore"""
         self.semaphore.release()
-    
+
     async def __aenter__(self):
         await self.acquire()
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.release()
 
@@ -76,13 +79,9 @@ class StaggeredRateLimiter:
 # Set to 40 requests per minute (allowing for some margin against the API limits)
 rate_limiter = StaggeredRateLimiter(requests_per_minute=40, max_concurrent=5)
 
-# Initialize the Azure OpenAI client
-client = AsyncAzureOpenAI(
-    api_key=openai_api_key,
-    api_version="2024-02-15-preview",
-    azure_endpoint="https://spd-prod-int-east-openai-apim.azure-api.us",
-    timeout=60  # Set timeout to 60 seconds
-)
+# Initialize clients later based on mode
+client_azure = None
+client_standard = None
 
 # Paths
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -263,7 +262,7 @@ def copy_pdf_to_reviewed_folder(pdf_path, contract_number):
         print(f"Error copying {pdf_path} to {dest_file}: {e}")
         return False
 
-async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
+async def analyze_contract_async(text, client, model_name, pass_number=1, max_retries=5):
     """Analyze contract text using LLM asynchronously with retries"""
     if pass_number == 1:
         prompt = f"""
@@ -275,9 +274,9 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
         Extract:
         1. Contract Number/PIID
         2. Parent Contract Number
-        3. Contract Description - IMPORTANT: Provide a DETAILED 1-2 sentence description that clearly explains what the contract is for. 
+        3. Contract Description - IMPORTANT: Provide a DETAILED 1-2 sentence description that clearly explains what the contract is for.
            Include WHO the vendor is, WHAT specific products or services they provide, and WHO the end recipients or beneficiaries are.
-           For example, instead of "Custom powered wheelchair", write "Contract with XYZ Medical Equipment Provider to supply custom-powered 
+           For example, instead of "Custom powered wheelchair", write "Contract with XYZ Medical Equipment Provider to supply custom-powered
            wheelchairs and related maintenance services to veteran patients at VA medical centers."
         4. Vendor Name
         5. Total Contract Value (format as $1,234,567.89)
@@ -513,10 +512,10 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
         try:
             # Use rate limiter instead of simple semaphore
             async with rate_limiter:
-                print(f"Calling OpenAI API to analyze contract (Pass {pass_number}, Attempt {attempt + 1}/{max_retries})...")
-                
+                print(f"Calling OpenAI API using model {model_name} to analyze contract (Pass {pass_number}, Attempt {attempt + 1}/{max_retries})...")
+
                 response = await client.chat.completions.create(
-                    model="gpt-4o",
+                    model=model_name,
                     messages=[
                         {"role": "system", "content": "You are an AI assistant that analyzes government contracts. Always provide comprehensive few-sentence descriptions that explain WHO the contract is with, WHAT specific services/products are provided, and WHO benefits from these services. Remember that contracts for EMR systems and healthcare IT infrastructure directly supporting patient care should be classified as NOT munchable. Contracts related to diversity, equity, and inclusion (DEI) initiatives or services that could be easily handled by in-house W2 employees should be classified as MUNCHABLE. Consider 'soft services' like healthcare technology management, data management, administrative consulting, portfolio management, case management, and product catalog management as MUNCHABLE. For contract modifications, mark the munchable status as 'N/A'. For IDIQ contracts, be more aggressive about termination unless they are for core medical services or benefits processing."},
                         {"role": "user", "content": prompt}
@@ -537,7 +536,7 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
             if attempt == max_retries - 1:
                 raise
             await asyncio.sleep(2 ** attempt)
-            
+
         except RateLimitError as e:
             # Parse the retry-after time from the error message if available
             retry_after = 1
@@ -546,10 +545,10 @@ async def analyze_contract_async(text, session, pass_number=1, max_retries=5):
                 retry_after = int(match.group(1)) / 1000 + 0.5  # Convert to seconds and add a small buffer
             else:
                 retry_after = 2 ** attempt + 1  # Exponential backoff if no specific time provided
-            
+
             print(f"Rate limit exceeded on attempt {attempt + 1}/{max_retries}. Waiting {retry_after:.2f} seconds before retry...")
             await asyncio.sleep(retry_after)
-            
+
         except Exception as e:
             print(f"Error analyzing contract on attempt {attempt + 1}/{max_retries}: {e}")
             if attempt == max_retries - 1:
@@ -630,7 +629,7 @@ async def extract_text_batch_parallel(pdf_batch):
 
     return processed_results
 
-async def process_contract_batch(contract_batch, pass_number=1):
+async def process_contract_batch(contract_batch, client, model_name, pass_number=1):
     """Process a batch of contracts with rate limiting"""
     batch_start_time = time.time()
     tasks = []
@@ -684,7 +683,7 @@ async def process_contract_batch(contract_batch, pass_number=1):
                             text += f"- {child.get('description', '')}\n"
 
             # Create task for contract analysis
-            task = asyncio.create_task(analyze_contract_async(text, None, pass_number))
+            task = asyncio.create_task(analyze_contract_async(text, client, model_name, pass_number))
             tasks.append((pdf_path, task))
 
             # The StaggeredRateLimiter class handles request pacing and avoids rate limits automatically
@@ -764,6 +763,29 @@ async def main_async():
     parser.add_argument('--batch-size', type=int, default=25, help='Number of contracts to process in one batch (default: 25)')
     args = parser.parse_args()
 
+    # --- Client and Model Selection ---
+    active_client = None
+    model_name = ""
+
+    if args.smart_mode:
+        print("Running in SMART mode using standard OpenAI client and o3-mini model.")
+        if not openai_api_key_smart:
+            raise ValueError("Smart mode requires 'openai_api_key_smart' in environment variables.")
+        active_client = AsyncOpenAI(api_key=openai_api_key_smart, timeout=60)
+        model_name = "o3-mini"
+    else:
+        print("Running in DEFAULT mode using Azure OpenAI client and gpt-4o model.")
+        if not openai_api_key_azure:
+            raise ValueError("Default mode requires 'openai_api_key' (for Azure) in environment variables.")
+        active_client = AsyncAzureOpenAI(
+            api_key=openai_api_key_azure,
+            api_version="2024-02-15-preview",
+            azure_endpoint="https://spd-prod-int-east-openai-apim.azure-api.us",
+            timeout=60  # Set timeout to 60 seconds
+        )
+        model_name = "gpt-4o"
+    # --- End Client and Model Selection ---
+
     # Get all PDF files from dataset folders
     pdf_files = get_all_pdf_files()
 
@@ -841,7 +863,7 @@ async def main_async():
             print(f"Processing first pass batch {i//batch_size + 1}/{(len(files_to_process) + batch_size - 1)//batch_size}")
 
             # Process batch
-            batch_results = await process_contract_batch(batch, pass_number=1)
+            batch_results = await process_contract_batch(batch, active_client, model_name, pass_number=1)
             all_results.extend(batch_results)
 
             # Update processed files log after each batch
@@ -930,7 +952,7 @@ async def main_async():
                 result['second_pass_reason'] = ''
 
         # Process batch for munchable analysis
-        munchable_results = await process_contract_batch(second_pass_batch, pass_number=2)
+        munchable_results = await process_contract_batch(second_pass_batch, active_client, model_name, pass_number=2)
 
         # Update results with munchable status
         for result in second_pass_batch:

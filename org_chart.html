@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VA Organization Chart</title>
+    <!-- Add D3.js library -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        #org-chart {
+            width: 100%;
+            overflow: auto;
+            margin-top: 20px;
+        }
+        .node {
+            cursor: pointer;
+        }
+        .node circle {
+            fill: #fff;
+            stroke: #4682B4;
+            stroke-width: 2px;
+        }
+        .node circle.full-time {
+            fill: #e6f3ff;
+            stroke: #4682B4;
+        }
+        .node circle.part-time {
+            fill: #ffe6e6;
+            stroke: #ff4444;
+        }
+        .node text {
+            font: 12px sans-serif;
+        }
+        .link {
+            fill: none;
+            stroke: #ccc;
+            stroke-width: 1.5px;
+        }
+        .highlighted circle {
+            fill: #ffffa0;
+            stroke: #ffcc00;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        #loading {
+            display: block;
+            color: #333;
+            margin: 20px 0;
+        }
+        .search-box {
+            margin-bottom: 10px;
+        }
+        select, input, button {
+            padding: 8px;
+            margin-right: 10px;
+        }
+        .file-input-container {
+            margin-bottom: 20px;
+        }
+        .tooltip {
+            position: absolute;
+            padding: 10px;
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            pointer-events: none;
+            max-width: 300px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            font-size: 12px;
+        }
+        .tooltip h4 {
+            margin: 0 0 5px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .tooltip p {
+            margin: 5px 0;
+        }
+        /* Added styles for expandable nodes */
+        .node circle.expandable {
+            fill: #ccccff;
+            cursor: pointer;
+        }
+        .node:hover circle {
+            stroke-width: 3px;
+        }
+        .expand-icon {
+            font-size: 14px;
+            fill: #4682B4;
+        }
+        /* Progress indicator */
+        .progress-container {
+            margin: 20px 0;
+            display: none;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress {
+            height: 100%;
+            background-color: #4682B4;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        /* Instructions */
+        .instructions {
+            background-color: #f8f8f8;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>VA Organization Chart</h1>
+
+    <div class="file-input-container">
+        <p>Select your CSV file (or enter data manually in the text area):</p>
+        <input type="file" id="file-input" accept=".csv">
+        <textarea id="csv-data" rows="5" style="width: 100%; margin-top: 10px;" placeholder="Or paste CSV data here and click 'Process Data'"></textarea>
+        <button id="process-data">Process Data</button>
+    </div>
+
+    <div class="instructions" id="usage-instructions">
+        <p><strong>How to use:</strong> Click on nodes to expand/collapse. Expandable nodes are highlighted with a blue fill. Search for specific items using the search box below.</p>
+    </div>
+
+    <div class="progress-container" id="progress-container">
+        <p>Processing data... <span id="progress-text">0%</span></p>
+        <div class="progress-bar">
+            <div class="progress" id="progress-bar"></div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="Search by name, position, ID...">
+            <button id="search-button">Search</button>
+        </div>
+
+        <div>
+            <label for="max-depth">Max Display Depth:</label>
+            <select id="max-depth">
+                <option value="1" selected>1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="10">10</option>
+            </select>
+
+            <label for="display-field">Display Field:</label>
+            <select id="display-field">
+                <option value="Official Position Title">Position Title</option>
+                <option value="Empl ID">Employee ID</option>
+                <option value="Admin">Admin</option>
+                <option value="Business Unit">Business Unit</option>
+                <option value="Region">Region</option>
+            </select>
+
+            <button id="expand-all">Expand All</button>
+            <button id="collapse-all">Collapse All</button>
+            <button id="implement-rif">Implement RIF</button>
+            <button id="revert-rif" style="display: none;">Revert RIF</button>
+        </div>
+    </div>
+
+    <div id="loading">Please load a CSV file to view the organization chart</div>
+    <div id="org-chart"></div>
+
+    <!-- New statistics container -->
+    <div id="role-statistics" style="margin-top: 20px; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Role Statistics for <span id="selected-node-name">Selected Node</span></h3>
+            <button id="close-stats" style="padding: 5px 10px; cursor: pointer;">Close</button>
+        </div>
+        <table id="role-stats-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <thead>
+                <tr>
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Role</th>
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Count</th>
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Percentage</th>
+                </tr>
+            </thead>
+            <tbody id="role-stats-body">
+                <!-- Role statistics will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Global variables
+        let employees = [];
+        let hierarchy = {};
+        let rootNodes = [];
+        let d3Root = null;
+        let svg = null;
+        let treeLayout = null;
+        let margin = {top: 20, right: 120, bottom: 20, left: 120};
+        let width = 1200 - margin.right - margin.left;
+        let height = 800 - margin.top - margin.bottom;
+        let i = 0;
+        let duration = 750;
+        let tooltip = null;
+        let batchSize = 100; // Process data in batches for better performance
+        let originalHierarchy = null; // Store original hierarchy for RIF revert
+
+        // Initialize the application when the DOM is fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Add event listeners
+            document.getElementById('file-input').addEventListener('change', handleFileSelect);
+            document.getElementById('process-data').addEventListener('click', processTextAreaData);
+            document.getElementById('search-button').addEventListener('click', performSearch);
+            document.getElementById('search-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+            document.getElementById('max-depth').addEventListener('change', renderOrgChart);
+            document.getElementById('display-field').addEventListener('change', renderOrgChart);
+            document.getElementById('expand-all').addEventListener('click', expandAll);
+            document.getElementById('collapse-all').addEventListener('click', collapseAll);
+            document.getElementById('implement-rif').addEventListener('click', implementRIF);
+            document.getElementById('revert-rif').addEventListener('click', revertRIF);
+            document.getElementById('close-stats').addEventListener('click', function() {
+                document.getElementById('role-statistics').style.display = 'none';
+            });
+
+            // Setup tooltip
+            tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+
+            // Setup SVG
+            setupSVG();
+        });
+
+        // Setup SVG for D3
+        function setupSVG() {
+            const orgChartDiv = document.getElementById('org-chart');
+
+            // Adjust width based on container size
+            width = orgChartDiv.clientWidth - margin.right - margin.left;
+
+            // Clear existing SVG if any
+            d3.select("#org-chart svg").remove();
+
+            // Create new SVG
+            svg = d3.select("#org-chart").append("svg")
+                .attr("width", width + margin.right + margin.left)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+            // Setup tree layout
+            treeLayout = d3.tree().size([height, width]);
+        }
+
+        // Handle file selection
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').textContent = 'Loading and processing data...';
+
+            // Show progress container
+            document.getElementById('progress-container').style.display = 'block';
+            document.getElementById('progress-bar').style.width = '0%';
+            document.getElementById('progress-text').textContent = '0%';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const csvText = e.target.result;
+                document.getElementById('csv-data').value = csvText;
+                processCSVData(csvText);
+            };
+            reader.onerror = function() {
+                document.getElementById('loading').textContent = 'Error reading file';
+                document.getElementById('progress-container').style.display = 'none';
+            };
+            reader.readAsText(file);
+        }
+
+        // Process data from textarea
+        function processTextAreaData() {
+            const csvText = document.getElementById('csv-data').value.trim();
+            if (!csvText) {
+                document.getElementById('loading').textContent = 'No data to process';
+                return;
+            }
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').textContent = 'Processing data...';
+
+            // Show progress container
+            document.getElementById('progress-container').style.display = 'block';
+            document.getElementById('progress-bar').style.width = '0%';
+            document.getElementById('progress-text').textContent = '0%';
+
+            processCSVData(csvText);
+        }
+
+        // Parse CSV text into structured data
+        function processCSVData(csvText) {
+            // Reset previous data
+            employees = [];
+
+            try {
+                // Split the CSV text into rows
+                const rows = csvText.split('\n');
+
+                if (rows.length < 2) {
+                    throw new Error('CSV data must have at least a header row and one data row');
+                }
+
+                // Extract headers from the first row
+                const headers = parseCSVRow(rows[0]);
+
+                // Validate required headers
+                const requiredHeaders = ['Position Number', 'Reports To Position Number', 'Official Position Title'];
+                const missingHeaders = requiredHeaders.filter(header => !headers.includes(header));
+
+                if (missingHeaders.length > 0) {
+                    throw new Error(`CSV is missing required headers: ${missingHeaders.join(', ')}`);
+                }
+
+                // Process data in batches for better performance with large datasets
+                const totalRows = rows.length - 1;
+                let processedRows = 0;
+
+                function processBatch(startIndex) {
+                    const endIndex = Math.min(startIndex + batchSize, rows.length);
+
+                    // Process this batch
+                    for (let i = startIndex; i < endIndex; i++) {
+                        if (rows[i].trim() === '') continue;
+
+                        // Split the row by comma, being careful with quoted values
+                        const values = parseCSVRow(rows[i]);
+
+                        // Create an employee object by mapping headers to values
+                        const employee = {};
+                        headers.forEach((header, index) => {
+                            employee[header] = values[index] || '';
+                        });
+
+                        // Only add employee if it has a valid position number
+                        if (employee['Position Number']) {
+                            employees.push(employee);
+                        }
+
+                        processedRows++;
+                    }
+
+                    // Update progress
+                    const progress = Math.round((processedRows / totalRows) * 100);
+                    document.getElementById('progress-bar').style.width = progress + '%';
+                    document.getElementById('progress-text').textContent = progress + '%';
+
+                    // Process next batch or finish
+                    if (endIndex < rows.length) {
+                        setTimeout(() => processBatch(endIndex), 0);
+                    } else {
+                        // Finished processing all rows
+                        validateCSVStructure();
+                        buildHierarchy();
+                        renderOrgChart();
+                        document.getElementById('loading').style.display = 'none';
+                        document.getElementById('progress-container').style.display = 'none';
+                        document.getElementById('usage-instructions').style.display = 'block';
+                    }
+                }
+
+                // Start processing with the first batch (skip header row)
+                processBatch(1);
+
+            } catch (error) {
+                console.error('Error processing CSV data:', error);
+                document.getElementById('loading').textContent = `Error processing data: ${error.message}`;
+                document.getElementById('progress-container').style.display = 'none';
+            }
+        }
+
+        // Parse a CSV row, handling quoted values correctly
+        function parseCSVRow(row) {
+            const result = [];
+            let currentValue = '';
+            let insideQuotes = false;
+
+            for (let i = 0; i < row.length; i++) {
+                const char = row[i];
+
+                if (char === '"') {
+                    insideQuotes = !insideQuotes;
+                } else if (char === ',' && !insideQuotes) {
+                    result.push(currentValue);
+                    currentValue = '';
+                } else {
+                    currentValue += char;
+                }
+            }
+
+            // Add the last value
+            result.push(currentValue);
+
+            return result;
+        }
+
+        // Validate CSV data structure
+        function validateCSVStructure() {
+            if (employees.length === 0) return false;
+
+            // Check for minimum required fields
+            const requiredFields = ['Position Number', 'Reports To Position Number'];
+            const firstEmployee = employees[0];
+
+            const missingFields = requiredFields.filter(field =>
+                !Object.keys(firstEmployee).includes(field));
+
+            if (missingFields.length > 0) {
+                console.error(`Missing required fields: ${missingFields.join(', ')}`);
+                alert(`The CSV file is missing these required fields: ${missingFields.join(', ')}`);
+                return false;
+            }
+
+            // Check supervisory fields - we need at least one to implement RIF
+            const supervisoryFields = [
+                'Supervisory Level',
+                'Supervisory Level Desc'
+            ];
+
+            const hasSupervisoryField = supervisoryFields.some(field =>
+                Object.keys(firstEmployee).includes(field));
+
+            if (!hasSupervisoryField) {
+                console.warn("Warning: No supervisory level fields found for RIF implementation");
+                alert("Warning: Your CSV file doesn't have supervisory level information, which may limit RIF functionality.");
+            }
+
+            return true;
+        }
+
+        // Build organizational hierarchy from employee data
+        function buildHierarchy() {
+            // Reset the hierarchy
+            hierarchy = {};
+            rootNodes = [];
+
+            console.log(`Building hierarchy for ${employees.length} employees`);
+
+            // Check for required fields
+            if (employees.length === 0) {
+                console.error("No employee data to process");
+                alert("No employee data found. Please load a valid CSV file.");
+                return;
+            }
+
+            const firstEmployee = employees[0];
+            const hasPositionNum = !!firstEmployee['Position Number'];
+            const hasReportsTo = !!firstEmployee['Reports To Position Number'];
+
+            console.log("Data validation:", {
+                hasPositionNumber: hasPositionNum,
+                hasReportsToPosition: hasReportsTo,
+                sampleFields: Object.keys(firstEmployee).slice(0, 10)
+            });
+
+            if (!hasPositionNum || !hasReportsTo) {
+                console.error("Critical field missing in CSV data!");
+                alert("The CSV file is missing required fields: Position Number and/or Reports To Position Number");
+                return;
+            }
+
+            // First, add all employees to the hierarchy object
+            let invalidRecords = 0;
+
+            employees.forEach(employee => {
+                if (!employee) {
+                    invalidRecords++;
+                    return;
+                }
+
+                const positionNumber = employee['Position Number'];
+
+                if (!positionNumber) {
+                    invalidRecords++;
+                    return;
+                }
+
+                if (!hierarchy[positionNumber]) {
+                    hierarchy[positionNumber] = {
+                        data: employee,
+                        children: [],
+                        directReports: 0,
+                        totalReports: 0
+                    };
+                } else {
+                    hierarchy[positionNumber].data = employee;
+                }
+            });
+
+            console.log(`Created hierarchy nodes: ${Object.keys(hierarchy).length} (skipped ${invalidRecords} invalid records)`);
+
+            // Then, establish parent-child relationships
+            let selfReportCount = 0;
+            let missingManagerCount = 0;
+            let validReportCount = 0;
+            let invalidRelationships = 0;
+
+            employees.forEach(employee => {
+                if (!employee) return;
+
+                const positionNumber = employee['Position Number'];
+                if (!positionNumber || !hierarchy[positionNumber]) return;
+
+                const reportsToPosition = employee['Reports To Position Number'];
+
+                // Skip if employee reports to themselves
+                if (reportsToPosition === positionNumber) {
+                    rootNodes.push(hierarchy[positionNumber]);
+                    selfReportCount++;
+                } else if (reportsToPosition && hierarchy[reportsToPosition]) {
+                    // This employee reports to someone else
+                    hierarchy[reportsToPosition].children.push(hierarchy[positionNumber]);
+                    hierarchy[reportsToPosition].directReports++;
+                    validReportCount++;
+                } else {
+                    // This employee is a root node (no manager or unknown manager)
+                    rootNodes.push(hierarchy[positionNumber]);
+
+                    if (!reportsToPosition) {
+                        // No manager
+                        missingManagerCount++;
+                    } else {
+                        // Missing manager in hierarchy
+                        invalidRelationships++;
+                    }
+                }
+            });
+
+            console.log(`Hierarchy statistics:`, {
+                totalEmployees: employees.length,
+                validHierarchyNodes: Object.keys(hierarchy).length,
+                selfReporting: selfReportCount,
+                missingManager: missingManagerCount,
+                invalidRelationships: invalidRelationships,
+                validReports: validReportCount,
+                rootNodes: rootNodes.length
+            });
+
+            if (rootNodes.length === 0) {
+                console.error("Failed to build hierarchy: No root nodes found");
+                alert("Could not build organization chart: No root nodes found. Please check CSV format.");
+                return;
+            }
+
+            // Calculate total reports for each node
+            calculateTotalReports(rootNodes);
+
+            // Sort root nodes by Admin for better organization
+            rootNodes.sort((a, b) => {
+                if (!a || !a.data || !b || !b.data) return 0;
+
+                const adminA = a.data.Admin || '';
+                const adminB = b.data.Admin || '';
+
+                if (adminA < adminB) return -1;
+                if (adminA > adminB) return 1;
+                return 0;
+            });
+        }
+
+        // Calculate total reports recursively
+        function calculateTotalReports(nodes) {
+            if (!nodes) return;
+
+            nodes.forEach(node => {
+                if (!node) return;
+
+                node.totalReports = node.directReports || 0;
+                if (node.children && node.children.length > 0) {
+                    calculateTotalReports(node.children);
+                    node.totalReports += node.children.reduce((sum, child) => {
+                        // Handle potential null child
+                        if (!child) return sum;
+                        return sum + (child.totalReports || 0) + 1;
+                    }, 0);
+                }
+            });
+        }
+
+        // Convert our hierarchy to D3 hierarchy
+        function prepareD3Hierarchy() {
+            if (rootNodes.length === 0) return null;
+
+            // For D3, we need a single root, so create a dummy root if multiple exist
+            let root;
+            if (rootNodes.length === 1) {
+                root = rootNodes[0];
+            } else {
+                root = {
+                    data: {
+                        'Official Position Title': 'Organization',
+                        'Position Number': 'ROOT',
+                        'Empl ID': '',
+                        'Admin': '',
+                        'Business Unit': '',
+                        'Region': ''
+                    },
+                    children: rootNodes.filter(node => node !== null), // Filter out null nodes
+                    directReports: rootNodes.length,
+                    totalReports: rootNodes.reduce((sum, node) => {
+                        if (!node) return sum;
+                        return sum + (node.totalReports || 0) + 1;
+                    }, 0)
+                };
+            }
+
+            // Convert to D3 hierarchy
+            return d3.hierarchy(root);
+        }
+
+        // Render the organization chart using D3
+        function renderOrgChart() {
+            const container = document.getElementById('org-chart');
+            if (rootNodes.length === 0) {
+                container.innerHTML = '<p>No data to display. Please load a CSV file.</p>';
+                return;
+            }
+
+            // Reset SVG
+            setupSVG();
+
+            // Get max depth setting
+            const maxDepth = parseInt(document.getElementById('max-depth').value);
+            const displayField = document.getElementById('display-field').value;
+
+            // Create D3 hierarchy
+            d3Root = prepareD3Hierarchy();
+            if (!d3Root) return;
+
+            // Assign IDs and set initial collapsed state
+            d3Root.descendants().forEach(function(d) {
+                d.id = i++;
+                d._children = null; // Initialize _children
+
+                // Collapse nodes beyond max depth
+                if (d.depth >= maxDepth && d.children) {
+                    d._children = d.children;
+                    d.children = null;
+                }
+            });
+
+            // Run layout
+            treeLayout(d3Root);
+
+            // Render the graph
+            update(d3Root, displayField);
+        }
+
+        // Update the D3 visualization
+        function update(source, displayField) {
+            // Assigns the x and y position for the nodes
+            const treeData = treeLayout(d3Root);
+
+            // Compute the new tree layout
+            const nodes = treeData.descendants();
+            const links = treeData.descendants().slice(1);
+
+            // Precompute all descendant counts for nodes
+            calculateDescendantCounts(d3Root);
+
+            // Normalize for fixed-depth
+            nodes.forEach(function(d) { d.y = d.depth * 180; });
+
+            // ****************** Nodes section ***************************
+
+            // Update the nodes...
+            const node = svg.selectAll('g.node')
+                .data(nodes, function(d) { return d.id || (d.id = ++i); });
+
+            // Enter any new nodes at the parent's previous position
+            const nodeEnter = node.enter().append('g')
+                .attr('class', 'node')
+                .attr('transform', function(d) {
+                    return "translate(" + source.y0 + "," + source.x0 + ")";
+                })
+                .on('click', function(event, d) {
+                    // Toggle children on click
+                    if (d.children) {
+                        d._children = d.children;
+                        d.children = null;
+                    } else {
+                        d.children = d._children;
+                        d._children = null;
+                    }
+                    update(d, displayField);
+
+                    // Generate and display role statistics for this node
+                    generateRoleStatistics(d);
+                })
+                .on('mouseover', function(event, d) {
+                    // Show tooltip
+                    tooltip.transition()
+                        .duration(200)
+                        .style("opacity", .9);
+
+                    // Calculate direct reports (immediate children)
+                    const directReports = d.children ? d.children.length : (d._children ? d._children.length : 0);
+
+                    // Use the precomputed total reports
+                    const totalReports = d.descendantCount;
+
+                    let tooltipContent = `
+                        <h4>${d.data.data['Official Position Title'] || 'Unknown Position'}</h4>
+                        <p><b>ID:</b> ${d.data.data['Empl ID'] || 'N/A'}</p>
+                        <p><b>Position:</b> ${d.data.data['Position Number'] || 'N/A'}</p>
+                        <p><b>Admin:</b> ${d.data.data['Admin'] || 'N/A'}</p>
+                        <p><b>Business Unit:</b> ${d.data.data['Business Unit'] || 'N/A'}</p>
+                        <p><b>Region:</b> ${d.data.data['Region'] || 'N/A'}</p>
+                        <p><b>Direct Reports:</b> ${directReports}</p>
+                        <p><b>Total Reports:</b> ${totalReports}</p>
+                    `;
+
+                    tooltip.html(tooltipContent)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on('mouseout', function(d) {
+                    // Hide tooltip
+                    tooltip.transition()
+                        .duration(500)
+                        .style("opacity", 0);
+                });
+
+            // Add Circle for the nodes
+            nodeEnter.append('circle')
+                .attr('r', 8)
+                .attr('class', function(d) {
+                    const classes = [];
+                    if (d._children) classes.push("expandable");
+                    if (d.data.data['Work Schedule']) {
+                        classes.push(d.data.data['Work Schedule'].toLowerCase().replace(' ', '-'));
+                    }
+                    return classes.join(' ');
+                })
+                .style('fill', function(d) {
+                    if (d._children) return "#ccccff";
+                    if (d.data.data['Work Schedule'] === 'Full Time') return "#e6f3ff";
+                    if (d.data.data['Work Schedule'] === 'Part Time') return "#ffe6e6";
+                    return "#fff";
+                })
+                .attr('stroke', function(d) {
+                    if (d.data.data['Work Schedule'] === 'Part Time') return "#ff4444";
+                    return "#4682B4";
+                })
+                .attr('stroke-width', 2);
+
+            // Add expansion indicator for nodes with children
+            nodeEnter.append('text')
+                .attr('class', 'expand-icon')
+                .attr('dy', '0.35em')
+                .attr('x', -3)
+                .attr('y', 0)
+                .attr('text-anchor', 'middle')
+                .style('font-weight', 'bold')
+                .style('pointer-events', 'none')
+                .text(function(d) {
+                    return d._children ? '+' : (d.children ? '-' : '');
+                });
+
+            // Add labels for the nodes
+            nodeEnter.append('text')
+                .attr('dy', '.35em')
+                .attr('x', function(d) {
+                    return d.children || d._children ? -13 : 13;
+                })
+                .attr('text-anchor', function(d) {
+                    return d.children || d._children ? 'end' : 'start';
+                })
+                .text(function(d) {
+                    // Truncate long text
+                    const text = d.data.data[displayField] || 'Unknown';
+                    return text.length > 25 ? text.substring(0, 22) + '...' : text;
+                });
+
+            // UPDATE
+            const nodeUpdate = nodeEnter.merge(node);
+
+            // Transition to the proper position for the node
+            nodeUpdate.transition()
+                .duration(duration)
+                .attr('transform', function(d) {
+                    return "translate(" + d.y + "," + d.x + ")";
+                });
+
+            // Update the node attributes and style
+            nodeUpdate.select('circle')
+                .attr('r', 8)
+                .attr('class', function(d) {
+                    const classes = [];
+                    if (d._children) classes.push("expandable");
+                    if (d.data.data['Work Schedule']) {
+                        classes.push(d.data.data['Work Schedule'].toLowerCase().replace(' ', '-'));
+                    }
+                    return classes.join(' ');
+                })
+                .style('fill', function(d) {
+                    if (d._children) return "#ccccff";
+                    if (d.data.data['Work Schedule'] === 'Full Time') return "#e6f3ff";
+                    if (d.data.data['Work Schedule'] === 'Part Time') return "#ffe6e6";
+                    return "#fff";
+                })
+                .attr('stroke', function(d) {
+                    if (d.data.data['Work Schedule'] === 'Part Time') return "#ff4444";
+                    return "#4682B4";
+                })
+                .attr('stroke-width', 2);
+
+            // Update expansion indicator
+            nodeUpdate.select('.expand-icon')
+                .text(function(d) {
+                    return d._children ? '+' : (d.children ? '-' : '');
+                });
+
+            // Remove any exiting nodes
+            const nodeExit = node.exit().transition()
+                .duration(duration)
+                .attr('transform', function(d) {
+                    return "translate(" + source.y + "," + source.x + ")";
+                })
+                .remove();
+
+            // On exit reduce the node circles size to 0
+            nodeExit.select('circle')
+                .attr('r', 0);
+
+            // On exit reduce the opacity of text labels
+            nodeExit.select('text')
+                .style('fill-opacity', 0);
+
+            // ****************** links section ***************************
+
+            // Update the links...
+            const link = svg.selectAll('path.link')
+                .data(links, function(d) { return d.id; });
+
+            // Enter any new links at the parent's previous position
+            const linkEnter = link.enter().insert('path', 'g')
+                .attr('class', 'link')
+                .attr('d', function(d){
+                    const o = {x: source.x0, y: source.y0};
+                    return diagonal(o, o);
+                });
+
+            // UPDATE
+            const linkUpdate = linkEnter.merge(link);
+
+            // Transition back to the parent element position
+            linkUpdate.transition()
+                .duration(duration)
+                .attr('d', function(d){ return diagonal(d, d.parent); });
+
+            // Remove any exiting links
+            const linkExit = link.exit().transition()
+                .duration(duration)
+                .attr('d', function(d) {
+                    const o = {x: source.x, y: source.y};
+                    return diagonal(o, o);
+                })
+                .remove();
+
+            // Store the old positions for transition
+            nodes.forEach(function(d){
+                d.x0 = d.x;
+                d.y0 = d.y;
+            });
+
+            // Creates a curved (diagonal) path from parent to the child nodes
+            function diagonal(s, d) {
+                const path = `M ${s.y} ${s.x}
+                        C ${(s.y + d.y) / 2} ${s.x},
+                          ${(s.y + d.y) / 2} ${d.x},
+                          ${d.y} ${d.x}`;
+                return path;
+            }
+        }
+
+        // Calculate descendant counts for each node
+        function calculateDescendantCounts(node) {
+            // Initialize count properties if they don't exist
+            if (!node.descendantCount) node.descendantCount = 0;
+
+            // Reset count for recalculation
+            node.descendantCount = 0;
+
+            // Count visible children
+            if (node.children) {
+                node.children.forEach(child => {
+                    calculateDescendantCounts(child);
+                    // Add this child and all its descendants
+                    node.descendantCount += 1 + child.descendantCount;
+                });
+            }
+
+            // Count collapsed children
+            if (node._children) {
+                node._children.forEach(child => {
+                    if (!child.descendantCount) {
+                        // If we haven't processed this collapsed child yet
+                        calculateDescendantCountsForCollapsed(child);
+                    }
+                    // Add this child and all its descendants
+                    node.descendantCount += 1 + child.descendantCount;
+                });
+            }
+        }
+
+        // Special function to calculate counts for collapsed subtrees
+        function calculateDescendantCountsForCollapsed(node) {
+            // Initialize count
+            node.descendantCount = 0;
+
+            // Process collapsed children (these are always in _children when collapsed)
+            if (node._children) {
+                node._children.forEach(child => {
+                    calculateDescendantCountsForCollapsed(child);
+                    node.descendantCount += 1 + child.descendantCount;
+                });
+            }
+        }
+
+        // Expand all nodes
+        function expandAll() {
+            if (!d3Root) return;
+
+            function expand(d) {
+                if (d._children) {
+                    d.children = d._children;
+                    d._children = null;
+                }
+                if (d.children) d.children.forEach(expand);
+            }
+
+            expand(d3Root);
+            update(d3Root, document.getElementById('display-field').value);
+        }
+
+        // Collapse all nodes except the root
+        function collapseAll() {
+            if (!d3Root) return;
+
+            function collapse(d) {
+                if (d.children) {
+                    if (d.depth > 0) {
+                        d._children = d.children;
+                        d.children = null;
+                    } else {
+                        d.children.forEach(collapse);
+                    }
+                }
+            }
+
+            collapse(d3Root);
+            update(d3Root, document.getElementById('display-field').value);
+        }
+
+        // Perform search based on user input
+        function performSearch() {
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            if (!searchTerm || !d3Root) return;
+
+            // Clear previous highlights
+            d3.selectAll('.node').classed('highlighted', false);
+
+            // Find and highlight matching nodes
+            let foundMatch = false;
+
+            function searchNode(d) {
+                let foundInThisNode = false;
+
+                // Get node text based on available fields
+                const nodeText = [
+                    d.data.data['Official Position Title'] || '',
+                    d.data.data['Empl ID'] || '',
+                    d.data.data['Position Number'] || '',
+                    d.data.data['Admin'] || '',
+                    d.data.data['Business Unit'] || '',
+                    d.data.data['Region'] || ''
+                ].join(' ').toLowerCase();
+
+                // Check if this node matches
+                if (nodeText.includes(searchTerm)) {
+                    d3.select(this).classed('highlighted', true);
+                    foundInThisNode = true;
+                    foundMatch = true;
+
+                    // Expand all parent nodes
+                    let parent = d.parent;
+                    while (parent) {
+                        if (parent._children) {
+                            parent.children = parent._children;
+                            parent._children = null;
+                        }
+                        parent = parent.parent;
+                    }
+                }
+
+                // If found a match in this node or child, make sure this node's path is visible
+                return foundInThisNode;
+            }
+
+            // Call the search function on all nodes
+            d3.selectAll('.node').each(searchNode);
+
+            // If we made changes to the tree by expanding nodes, update the visualization
+            if (foundMatch) {
+                update(d3Root, document.getElementById('display-field').value);
+
+                // Scroll to the first highlighted node
+                const highlightedNode = document.querySelector('.highlighted');
+                if (highlightedNode) {
+                    highlightedNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            if (d3Root) {
+                width = document.getElementById('org-chart').clientWidth - margin.right - margin.left;
+                d3.select("#org-chart svg")
+                    .attr("width", width + margin.right + margin.left);
+                treeLayout.size([height, width]);
+                update(d3Root, document.getElementById('display-field').value);
+            }
+        });
+
+        // Generate and display role statistics for a node
+        function generateRoleStatistics(node) {
+            // Get the name of the selected node
+            const nodeName = node.data.data['Official Position Title'] || 'Unknown Position';
+            document.getElementById('selected-node-name').textContent = nodeName;
+
+            // Show the statistics container
+            document.getElementById('role-statistics').style.display = 'block';
+
+            // Clear previous statistics
+            const tableBody = document.getElementById('role-stats-body');
+            tableBody.innerHTML = '';
+
+            // Count roles in this subtree
+            const roleCounts = {};
+            let totalEmployees = 0;
+
+            // Function to count roles recursively
+            function countRoles(n) {
+                // Skip counting the root node if it's a dummy node
+                if (n.data.data['Position Number'] !== 'ROOT') {
+                    const role = n.data.data['Official Position Title'] || 'Unknown Position';
+                    roleCounts[role] = (roleCounts[role] || 0) + 1;
+                    totalEmployees++;
+                }
+
+                // Count roles in children (visible and collapsed)
+                if (n.children) {
+                    n.children.forEach(countRoles);
+                }
+                if (n._children) {
+                    n._children.forEach(countRoles);
+                }
+            }
+
+            // Start counting from the selected node
+            countRoles(node);
+
+            // Sort roles by count (descending)
+            const sortedRoles = Object.keys(roleCounts).sort((a, b) => roleCounts[b] - roleCounts[a]);
+
+            // Populate the table with role statistics
+            sortedRoles.forEach(role => {
+                const count = roleCounts[role];
+                const percentage = ((count / totalEmployees) * 100).toFixed(2);
+
+                const row = document.createElement('tr');
+
+                const roleCell = document.createElement('td');
+                roleCell.textContent = role;
+                roleCell.style.border = '1px solid #ddd';
+                roleCell.style.padding = '8px';
+                roleCell.style.textAlign = 'left';
+
+                const countCell = document.createElement('td');
+                countCell.textContent = count;
+                countCell.style.border = '1px solid #ddd';
+                countCell.style.padding = '8px';
+                countCell.style.textAlign = 'center';
+
+                const percentageCell = document.createElement('td');
+                percentageCell.textContent = percentage + '%';
+                percentageCell.style.border = '1px solid #ddd';
+                percentageCell.style.padding = '8px';
+                percentageCell.style.textAlign = 'center';
+
+                row.appendChild(roleCell);
+                row.appendChild(countCell);
+                row.appendChild(percentageCell);
+
+                tableBody.appendChild(row);
+            });
+
+            // Add a total row
+            const totalRow = document.createElement('tr');
+
+            const totalLabelCell = document.createElement('td');
+            totalLabelCell.textContent = 'Total';
+            totalLabelCell.style.border = '1px solid #ddd';
+            totalLabelCell.style.padding = '8px';
+            totalLabelCell.style.fontWeight = 'bold';
+
+            const totalCountCell = document.createElement('td');
+            totalCountCell.textContent = totalEmployees;
+            totalCountCell.style.border = '1px solid #ddd';
+            totalCountCell.style.padding = '8px';
+            totalCountCell.style.textAlign = 'center';
+            totalCountCell.style.fontWeight = 'bold';
+
+            const totalPercentCell = document.createElement('td');
+            totalPercentCell.textContent = '100.00%';
+            totalPercentCell.style.border = '1px solid #ddd';
+            totalPercentCell.style.padding = '8px';
+            totalPercentCell.style.textAlign = 'center';
+            totalPercentCell.style.fontWeight = 'bold';
+
+            totalRow.appendChild(totalLabelCell);
+            totalRow.appendChild(totalCountCell);
+            totalRow.appendChild(totalPercentCell);
+
+            tableBody.appendChild(totalRow);
+        }
+
+        // Implement RIF (Reduction in Force) - final version
+        function implementRIF() {
+            if (!d3Root) return;
+
+            // Show loading indicator
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loading').textContent = 'Applying RIF...';
+
+            // Introduce slight delay to allow UI to update
+            setTimeout(() => {
+                try {
+                    console.log("Starting RIF implementation...");
+
+                    // Store original hierarchy for revert
+                    originalHierarchy = JSON.parse(JSON.stringify(hierarchy));
+
+                    // Track RIF statistics
+                    let totalPositions = 0;
+                    let removedPositions = 0;
+
+                    // Count all positions in the hierarchy
+                    function countAllPositions(node) {
+                        if (!node) return 0;
+                        let count = 1; // Count this node
+                        if (node.children && node.children.length > 0) {
+                            node.children.forEach(child => {
+                                count += countAllPositions(child);
+                            });
+                        }
+                        return count;
+                    }
+
+                    // Get an estimate of total positions to calculate target percentage
+                    const estimatedTotal = rootNodes.reduce((sum, node) => sum + countAllPositions(node), 0);
+                    console.log(`Estimated total positions: ${estimatedTotal}`);
+
+                    // Apply RIF rules - more aggressive to remove 20-80% of positions
+                    function applyRIF(node) {
+                        // Remove positions based on criteria
+                        if (node && node.children && node.children.length > 0) {
+                            totalPositions += node.children.length;
+
+                            // Count before filtering
+                            const beforeCount = node.children.length;
+
+                            // Remove positions with specific titles or levels
+                            node.children = node.children.filter(child => {
+                                // Skip nodes with missing data
+                                if (!child || !child.data || !child.data.data) {
+                                    return true; // Keep nodes with missing data
+                                }
+
+                                const employee = child.data.data;
+
+                                // Get position details
+                                const title = ((employee['Official Position Title'] || '') + '').toLowerCase();
+                                const level = (employee['Supervisory Level'] || '') + '';
+                                const supervLevel = ((employee['Supervisory Level Desc'] || '') + '').toLowerCase();
+
+                                // KEEP ONLY THE MOST CRITICAL LEADERSHIP POSITIONS
+                                // Only keep top management and executives
+                                if (
+                                    // Keep only top executives and directors
+                                    (title.includes('secretary') && !title.includes('assistant')) ||
+                                    title.includes('executive director') ||
+                                    title.includes('chief') ||
+                                    title.includes('deputy secretary') ||
+                                    title.includes('assistant secretary') ||
+
+                                    // Keep high-level supervisors
+                                    (level >= '7') || // Very high supervisory levels only
+
+                                    // Keep by supervisory description
+                                    supervLevel.includes('chief of service') ||
+                                    supervLevel.includes('facility director')
+                                ) {
+                                    return true; // Keep these critical positions
+                                }
+
+                                // REMOVE ALL NON-CRITICAL POSITIONS
+
+                                // First wave: Remove all non-supervisory positions
+                                if (
+                                    supervLevel.includes('nonsupervisory') ||
+                                    level === '0' ||
+                                    !level
+                                ) {
+                                    return false; // Remove all non-supervisory positions
+                                }
+
+                                // Second wave: Remove all positions containing these words
+                                const nonCriticalTitles = [
+                                    'assistant',
+                                    'specialist',
+                                    'analyst',
+                                    'clerk',
+                                    'support',
+                                    'coordinator',
+                                    'representative',
+                                    'technician',
+                                    'officer',
+                                    'manager', // Remove most managers except top executives
+                                    'administrator',
+                                    'supervisor' // Remove most supervisors except top-level
+                                ];
+
+                                if (nonCriticalTitles.some(keyword => title.includes(keyword))) {
+                                    return false; // Remove positions with these titles
+                                }
+
+                                // Third wave: Remove low to mid supervisory positions (1-4)
+                                if (level >= '1' && level <= '4') {
+                                    return false; // Remove low to mid supervisory levels
+                                }
+
+                                // By default, keep the position if it doesn't match removal criteria
+                                return true;
+                            });
+
+                            // Count removed positions
+                            removedPositions += (beforeCount - node.children.length);
+
+                            // Recursively apply RIF to remaining children
+                            node.children.forEach(applyRIF);
+                        }
+                    }
+
+                    // Apply RIF to all root nodes
+                    rootNodes.forEach(applyRIF);
+
+                    // Calculate percentage with a fallback to avoid NaN
+                    const rifPercentage = totalPositions > 0 ?
+                        ((removedPositions/totalPositions)*100).toFixed(1) :
+                        "0.0";
+
+                    console.log(`RIF completed: Removed ${removedPositions} of ${totalPositions} positions (${rifPercentage}%)`);
+
+                    // Rebuild hierarchy and render
+                    buildHierarchy();
+                    renderOrgChart();
+
+                    // Show revert button
+                    document.getElementById('revert-rif').style.display = 'inline-block';
+
+                    // Hide loading indicator
+                    document.getElementById('loading').style.display = 'none';
+
+                    // Alert user of results
+                    alert(`RIF completed: Removed ${removedPositions} positions (${rifPercentage}% of total)`);
+                } catch (error) {
+                    console.error("Error during RIF implementation:", error);
+                    document.getElementById('loading').textContent = 'Error applying RIF: ' + error.message;
+                    alert("Error applying RIF: " + error.message);
+                }
+            }, 100); // Short delay to update UI
+        }
+
+        // Revert RIF changes
+        function revertRIF() {
+            if (!originalHierarchy) return;
+
+            // Restore original hierarchy
+            hierarchy = JSON.parse(JSON.stringify(originalHierarchy));
+            rootNodes = [];
+
+            // Rebuild root nodes
+            Object.values(hierarchy).forEach(node => {
+                if (!node.data.data['Reports To Position Number']) {
+                    rootNodes.push(node);
+                }
+            });
+
+            // Rebuild hierarchy and render
+            buildHierarchy();
+            renderOrgChart();
+
+            // Hide revert button
+            document.getElementById('revert-rif').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

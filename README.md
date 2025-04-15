@@ -1,6 +1,4 @@
-# VA tools
-
-These are tools I have written to do my work more effectively at the VA.
+Tools I have written to do my work more effectively at the VA.
 
 ## Org Charts Tools
 

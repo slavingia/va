@@ -133,7 +133,7 @@
     </div>
 
     <div class="instructions" id="usage-instructions">
-        <p><strong>How to use:</strong> Click on nodes to expand/collapse. Expandable nodes are highlighted with a blue fill. Search for specific items using the search box below.</p>
+        <p><strong>How to use:</strong> Click on nodes to expand/collapse. Expandable nodes are highlighted with a blue fill. Red circles indicate part-time employees.</p>
     </div>
 
     <div class="progress-container" id="progress-container">
@@ -144,11 +144,6 @@
     </div>
 
     <div class="controls">
-        <div class="search-box">
-            <input type="text" id="search-input" placeholder="Search by name, position, ID...">
-            <button id="search-button">Search</button>
-        </div>
-
         <div>
             <label for="max-depth">Max Display Depth:</label>
             <select id="max-depth">
@@ -171,8 +166,6 @@
 
             <button id="expand-all">Expand All</button>
             <button id="collapse-all">Collapse All</button>
-            <button id="implement-rif">Implement RIF</button>
-            <button id="revert-rif" style="display: none;">Revert RIF</button>
         </div>
     </div>
 
@@ -199,6 +192,25 @@
         </table>
     </div>
 
+    <!-- New location statistics container -->
+    <div id="location-statistics" style="margin-top: 20px; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Location Statistics for <span id="selected-node-name-location">Selected Node</span></h3>
+        </div>
+        <table id="location-stats-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <thead>
+                <tr>
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Location</th>
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Count</th>
+                    <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Percentage</th>
+                </tr>
+            </thead>
+            <tbody id="location-stats-body">
+                <!-- Location statistics will be populated here -->
+            </tbody>
+        </table>
+    </div>
+
     <script>
         // Global variables
         let employees = [];
@@ -221,18 +233,13 @@
             // Add event listeners
             document.getElementById('file-input').addEventListener('change', handleFileSelect);
             document.getElementById('process-data').addEventListener('click', processTextAreaData);
-            document.getElementById('search-button').addEventListener('click', performSearch);
-            document.getElementById('search-input').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') performSearch();
-            });
             document.getElementById('max-depth').addEventListener('change', renderOrgChart);
             document.getElementById('display-field').addEventListener('change', renderOrgChart);
             document.getElementById('expand-all').addEventListener('click', expandAll);
             document.getElementById('collapse-all').addEventListener('click', collapseAll);
-            document.getElementById('implement-rif').addEventListener('click', implementRIF);
-            document.getElementById('revert-rif').addEventListener('click', revertRIF);
             document.getElementById('close-stats').addEventListener('click', function() {
                 document.getElementById('role-statistics').style.display = 'none';
+                document.getElementById('location-statistics').style.display = 'none';
             });
 
             // Setup tooltip
@@ -377,6 +384,11 @@
                         document.getElementById('loading').style.display = 'none';
                         document.getElementById('progress-container').style.display = 'none';
                         document.getElementById('usage-instructions').style.display = 'block';
+
+                        // Show statistics for the root node immediately
+                        if (d3Root) {
+                            generateRoleStatistics(d3Root);
+                        }
                     }
                 }
 
@@ -430,20 +442,6 @@
                 console.error(`Missing required fields: ${missingFields.join(', ')}`);
                 alert(`The CSV file is missing these required fields: ${missingFields.join(', ')}`);
                 return false;
-            }
-
-            // Check supervisory fields - we need at least one to implement RIF
-            const supervisoryFields = [
-                'Supervisory Level',
-                'Supervisory Level Desc'
-            ];
-
-            const hasSupervisoryField = supervisoryFields.some(field =>
-                Object.keys(firstEmployee).includes(field));
-
-            if (!hasSupervisoryField) {
-                console.warn("Warning: No supervisory level fields found for RIF implementation");
-                alert("Warning: Your CSV file doesn't have supervisory level information, which may limit RIF functionality.");
             }
 
             return true;
@@ -727,6 +725,8 @@
                         <p><b>Admin:</b> ${d.data.data['Admin'] || 'N/A'}</p>
                         <p><b>Business Unit:</b> ${d.data.data['Business Unit'] || 'N/A'}</p>
                         <p><b>Region:</b> ${d.data.data['Region'] || 'N/A'}</p>
+                        <p><b>Location:</b> ${d.data.data['Location Desc'] || 'N/A'}</p>
+                        <p><b>Supervisory Level:</b> ${d.data.data['Supervisory Level Desc'] || 'N/A'}</p>
                         <p><b>Direct Reports:</b> ${directReports}</p>
                         <p><b>Total Reports:</b> ${totalReports}</p>
                     `;
@@ -974,66 +974,6 @@
             update(d3Root, document.getElementById('display-field').value);
         }
 
-        // Perform search based on user input
-        function performSearch() {
-            const searchTerm = document.getElementById('search-input').value.toLowerCase();
-            if (!searchTerm || !d3Root) return;
-
-            // Clear previous highlights
-            d3.selectAll('.node').classed('highlighted', false);
-
-            // Find and highlight matching nodes
-            let foundMatch = false;
-
-            function searchNode(d) {
-                let foundInThisNode = false;
-
-                // Get node text based on available fields
-                const nodeText = [
-                    d.data.data['Official Position Title'] || '',
-                    d.data.data['Empl ID'] || '',
-                    d.data.data['Position Number'] || '',
-                    d.data.data['Admin'] || '',
-                    d.data.data['Business Unit'] || '',
-                    d.data.data['Region'] || ''
-                ].join(' ').toLowerCase();
-
-                // Check if this node matches
-                if (nodeText.includes(searchTerm)) {
-                    d3.select(this).classed('highlighted', true);
-                    foundInThisNode = true;
-                    foundMatch = true;
-
-                    // Expand all parent nodes
-                    let parent = d.parent;
-                    while (parent) {
-                        if (parent._children) {
-                            parent.children = parent._children;
-                            parent._children = null;
-                        }
-                        parent = parent.parent;
-                    }
-                }
-
-                // If found a match in this node or child, make sure this node's path is visible
-                return foundInThisNode;
-            }
-
-            // Call the search function on all nodes
-            d3.selectAll('.node').each(searchNode);
-
-            // If we made changes to the tree by expanding nodes, update the visualization
-            if (foundMatch) {
-                update(d3Root, document.getElementById('display-field').value);
-
-                // Scroll to the first highlighted node
-                const highlightedNode = document.querySelector('.highlighted');
-                if (highlightedNode) {
-                    highlightedNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }
-        }
-
         // Handle window resize
         window.addEventListener('resize', function() {
             if (d3Root) {
@@ -1050,24 +990,34 @@
             // Get the name of the selected node
             const nodeName = node.data.data['Official Position Title'] || 'Unknown Position';
             document.getElementById('selected-node-name').textContent = nodeName;
+            document.getElementById('selected-node-name-location').textContent = nodeName;
 
-            // Show the statistics container
+            // Show the statistics containers
             document.getElementById('role-statistics').style.display = 'block';
+            document.getElementById('location-statistics').style.display = 'block';
 
             // Clear previous statistics
-            const tableBody = document.getElementById('role-stats-body');
-            tableBody.innerHTML = '';
+            const roleTableBody = document.getElementById('role-stats-body');
+            roleTableBody.innerHTML = '';
 
-            // Count roles in this subtree
+            const locationTableBody = document.getElementById('location-stats-body');
+            locationTableBody.innerHTML = '';
+
+            // Count roles and locations in this subtree
             const roleCounts = {};
+            const locationCounts = {};
             let totalEmployees = 0;
 
-            // Function to count roles recursively
+            // Function to count roles and locations recursively
             function countRoles(n) {
                 // Skip counting the root node if it's a dummy node
                 if (n.data.data['Position Number'] !== 'ROOT') {
                     const role = n.data.data['Official Position Title'] || 'Unknown Position';
                     roleCounts[role] = (roleCounts[role] || 0) + 1;
+
+                    const location = n.data.data['Location Desc'] || 'Unknown Location';
+                    locationCounts[location] = (locationCounts[location] || 0) + 1;
+
                     totalEmployees++;
                 }
 
@@ -1115,217 +1065,101 @@
                 row.appendChild(countCell);
                 row.appendChild(percentageCell);
 
-                tableBody.appendChild(row);
+                roleTableBody.appendChild(row);
             });
 
-            // Add a total row
-            const totalRow = document.createElement('tr');
+            // Add a total row for roles
+            const totalRoleRow = document.createElement('tr');
 
-            const totalLabelCell = document.createElement('td');
-            totalLabelCell.textContent = 'Total';
-            totalLabelCell.style.border = '1px solid #ddd';
-            totalLabelCell.style.padding = '8px';
-            totalLabelCell.style.fontWeight = 'bold';
+            const totalRoleLabelCell = document.createElement('td');
+            totalRoleLabelCell.textContent = 'Total';
+            totalRoleLabelCell.style.border = '1px solid #ddd';
+            totalRoleLabelCell.style.padding = '8px';
+            totalRoleLabelCell.style.fontWeight = 'bold';
 
-            const totalCountCell = document.createElement('td');
-            totalCountCell.textContent = totalEmployees;
-            totalCountCell.style.border = '1px solid #ddd';
-            totalCountCell.style.padding = '8px';
-            totalCountCell.style.textAlign = 'center';
-            totalCountCell.style.fontWeight = 'bold';
+            const totalRoleCountCell = document.createElement('td');
+            totalRoleCountCell.textContent = totalEmployees;
+            totalRoleCountCell.style.border = '1px solid #ddd';
+            totalRoleCountCell.style.padding = '8px';
+            totalRoleCountCell.style.textAlign = 'center';
+            totalRoleCountCell.style.fontWeight = 'bold';
 
-            const totalPercentCell = document.createElement('td');
-            totalPercentCell.textContent = '100.00%';
-            totalPercentCell.style.border = '1px solid #ddd';
-            totalPercentCell.style.padding = '8px';
-            totalPercentCell.style.textAlign = 'center';
-            totalPercentCell.style.fontWeight = 'bold';
+            const totalRolePercentCell = document.createElement('td');
+            totalRolePercentCell.textContent = '100.00%';
+            totalRolePercentCell.style.border = '1px solid #ddd';
+            totalRolePercentCell.style.padding = '8px';
+            totalRolePercentCell.style.textAlign = 'center';
+            totalRolePercentCell.style.fontWeight = 'bold';
 
-            totalRow.appendChild(totalLabelCell);
-            totalRow.appendChild(totalCountCell);
-            totalRow.appendChild(totalPercentCell);
+            totalRoleRow.appendChild(totalRoleLabelCell);
+            totalRoleRow.appendChild(totalRoleCountCell);
+            totalRoleRow.appendChild(totalRolePercentCell);
 
-            tableBody.appendChild(totalRow);
-        }
+            roleTableBody.appendChild(totalRoleRow);
 
-        // Implement RIF (Reduction in Force) - final version
-        function implementRIF() {
-            if (!d3Root) return;
+            // Sort locations by count (descending)
+            const sortedLocations = Object.keys(locationCounts).sort((a, b) => locationCounts[b] - locationCounts[a]);
 
-            // Show loading indicator
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('loading').textContent = 'Applying RIF...';
+            // Populate the table with location statistics
+            sortedLocations.forEach(location => {
+                const count = locationCounts[location];
+                const percentage = ((count / totalEmployees) * 100).toFixed(2);
 
-            // Introduce slight delay to allow UI to update
-            setTimeout(() => {
-                try {
-                    console.log("Starting RIF implementation...");
+                const row = document.createElement('tr');
 
-                    // Store original hierarchy for revert
-                    originalHierarchy = JSON.parse(JSON.stringify(hierarchy));
+                const locationCell = document.createElement('td');
+                locationCell.textContent = location;
+                locationCell.style.border = '1px solid #ddd';
+                locationCell.style.padding = '8px';
+                locationCell.style.textAlign = 'left';
 
-                    // Track RIF statistics
-                    let totalPositions = 0;
-                    let removedPositions = 0;
+                const countCell = document.createElement('td');
+                countCell.textContent = count;
+                countCell.style.border = '1px solid #ddd';
+                countCell.style.padding = '8px';
+                countCell.style.textAlign = 'center';
 
-                    // Count all positions in the hierarchy
-                    function countAllPositions(node) {
-                        if (!node) return 0;
-                        let count = 1; // Count this node
-                        if (node.children && node.children.length > 0) {
-                            node.children.forEach(child => {
-                                count += countAllPositions(child);
-                            });
-                        }
-                        return count;
-                    }
+                const percentageCell = document.createElement('td');
+                percentageCell.textContent = percentage + '%';
+                percentageCell.style.border = '1px solid #ddd';
+                percentageCell.style.padding = '8px';
+                percentageCell.style.textAlign = 'center';
 
-                    // Get an estimate of total positions to calculate target percentage
-                    const estimatedTotal = rootNodes.reduce((sum, node) => sum + countAllPositions(node), 0);
-                    console.log(`Estimated total positions: ${estimatedTotal}`);
+                row.appendChild(locationCell);
+                row.appendChild(countCell);
+                row.appendChild(percentageCell);
 
-                    // Apply RIF rules - more aggressive to remove 20-80% of positions
-                    function applyRIF(node) {
-                        // Remove positions based on criteria
-                        if (node && node.children && node.children.length > 0) {
-                            totalPositions += node.children.length;
-
-                            // Count before filtering
-                            const beforeCount = node.children.length;
-
-                            // Remove positions with specific titles or levels
-                            node.children = node.children.filter(child => {
-                                // Skip nodes with missing data
-                                if (!child || !child.data || !child.data.data) {
-                                    return true; // Keep nodes with missing data
-                                }
-
-                                const employee = child.data.data;
-
-                                // Get position details
-                                const title = ((employee['Official Position Title'] || '') + '').toLowerCase();
-                                const level = (employee['Supervisory Level'] || '') + '';
-                                const supervLevel = ((employee['Supervisory Level Desc'] || '') + '').toLowerCase();
-
-                                // KEEP ONLY THE MOST CRITICAL LEADERSHIP POSITIONS
-                                // Only keep top management and executives
-                                if (
-                                    // Keep only top executives and directors
-                                    (title.includes('secretary') && !title.includes('assistant')) ||
-                                    title.includes('executive director') ||
-                                    title.includes('chief') ||
-                                    title.includes('deputy secretary') ||
-                                    title.includes('assistant secretary') ||
-
-                                    // Keep high-level supervisors
-                                    (level >= '7') || // Very high supervisory levels only
-
-                                    // Keep by supervisory description
-                                    supervLevel.includes('chief of service') ||
-                                    supervLevel.includes('facility director')
-                                ) {
-                                    return true; // Keep these critical positions
-                                }
-
-                                // REMOVE ALL NON-CRITICAL POSITIONS
-
-                                // First wave: Remove all non-supervisory positions
-                                if (
-                                    supervLevel.includes('nonsupervisory') ||
-                                    level === '0' ||
-                                    !level
-                                ) {
-                                    return false; // Remove all non-supervisory positions
-                                }
-
-                                // Second wave: Remove all positions containing these words
-                                const nonCriticalTitles = [
-                                    'assistant',
-                                    'specialist',
-                                    'analyst',
-                                    'clerk',
-                                    'support',
-                                    'coordinator',
-                                    'representative',
-                                    'technician',
-                                    'officer',
-                                    'manager', // Remove most managers except top executives
-                                    'administrator',
-                                    'supervisor' // Remove most supervisors except top-level
-                                ];
-
-                                if (nonCriticalTitles.some(keyword => title.includes(keyword))) {
-                                    return false; // Remove positions with these titles
-                                }
-
-                                // Third wave: Remove low to mid supervisory positions (1-4)
-                                if (level >= '1' && level <= '4') {
-                                    return false; // Remove low to mid supervisory levels
-                                }
-
-                                // By default, keep the position if it doesn't match removal criteria
-                                return true;
-                            });
-
-                            // Count removed positions
-                            removedPositions += (beforeCount - node.children.length);
-
-                            // Recursively apply RIF to remaining children
-                            node.children.forEach(applyRIF);
-                        }
-                    }
-
-                    // Apply RIF to all root nodes
-                    rootNodes.forEach(applyRIF);
-
-                    // Calculate percentage with a fallback to avoid NaN
-                    const rifPercentage = totalPositions > 0 ?
-                        ((removedPositions/totalPositions)*100).toFixed(1) :
-                        "0.0";
-
-                    console.log(`RIF completed: Removed ${removedPositions} of ${totalPositions} positions (${rifPercentage}%)`);
-
-                    // Rebuild hierarchy and render
-                    buildHierarchy();
-                    renderOrgChart();
-
-                    // Show revert button
-                    document.getElementById('revert-rif').style.display = 'inline-block';
-
-                    // Hide loading indicator
-                    document.getElementById('loading').style.display = 'none';
-
-                    // Alert user of results
-                    alert(`RIF completed: Removed ${removedPositions} positions (${rifPercentage}% of total)`);
-                } catch (error) {
-                    console.error("Error during RIF implementation:", error);
-                    document.getElementById('loading').textContent = 'Error applying RIF: ' + error.message;
-                    alert("Error applying RIF: " + error.message);
-                }
-            }, 100); // Short delay to update UI
-        }
-
-        // Revert RIF changes
-        function revertRIF() {
-            if (!originalHierarchy) return;
-
-            // Restore original hierarchy
-            hierarchy = JSON.parse(JSON.stringify(originalHierarchy));
-            rootNodes = [];
-
-            // Rebuild root nodes
-            Object.values(hierarchy).forEach(node => {
-                if (!node.data.data['Reports To Position Number']) {
-                    rootNodes.push(node);
-                }
+                locationTableBody.appendChild(row);
             });
 
-            // Rebuild hierarchy and render
-            buildHierarchy();
-            renderOrgChart();
+            // Add a total row for locations
+            const totalLocationRow = document.createElement('tr');
 
-            // Hide revert button
-            document.getElementById('revert-rif').style.display = 'none';
+            const totalLocationLabelCell = document.createElement('td');
+            totalLocationLabelCell.textContent = 'Total';
+            totalLocationLabelCell.style.border = '1px solid #ddd';
+            totalLocationLabelCell.style.padding = '8px';
+            totalLocationLabelCell.style.fontWeight = 'bold';
+
+            const totalLocationCountCell = document.createElement('td');
+            totalLocationCountCell.textContent = totalEmployees;
+            totalLocationCountCell.style.border = '1px solid #ddd';
+            totalLocationCountCell.style.padding = '8px';
+            totalLocationCountCell.style.textAlign = 'center';
+            totalLocationCountCell.style.fontWeight = 'bold';
+
+            const totalLocationPercentCell = document.createElement('td');
+            totalLocationPercentCell.textContent = '100.00%';
+            totalLocationPercentCell.style.border = '1px solid #ddd';
+            totalLocationPercentCell.style.padding = '8px';
+            totalLocationPercentCell.style.textAlign = 'center';
+            totalLocationPercentCell.style.fontWeight = 'bold';
+
+            totalLocationRow.appendChild(totalLocationLabelCell);
+            totalLocationRow.appendChild(totalLocationCountCell);
+            totalLocationRow.appendChild(totalLocationPercentCell);
+
+            locationTableBody.appendChild(totalLocationRow);
         }
     </script>
 </body>

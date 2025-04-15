@@ -1,14 +1,14 @@
 Tools I have written to do my work more effectively at the VA.
 
-## Org Charts Tools
+## Org Charts
 
 Org chart tools are in the [org charts](./org_charts/) directory.
 
-## Contracts Tools
+## Contracts
 
 Contract processing and analysis tools are in the [contracts](./contracts) directory.
 
-## Executive Order Analysis Tools
+## Executive Orders
 
 Executive Order compliance analysis tools are in the [eos](./eos) directory.
 

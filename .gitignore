@@ -1,2 +1,8 @@
 org_charts/cost_center_outputs
-org_charts/org_data.csv
+contracts/azure_pdfs
+contracts/text_cache
+**/*.csv
+**/*.pdf
+**/.env
+**/.env.*
+**/*.json

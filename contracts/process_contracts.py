@@ -681,6 +681,7 @@ async def main_async():
     parser.add_argument('--second-pass-only', action='store_true', help='Skip first pass and only do second pass analysis')
     parser.add_argument('--test-mode', action='store_true', help='Run in test mode with a small batch of files')
     parser.add_argument('--batch-size', type=int, default=25, help='Number of contracts to process in one batch (default: 25)')
+    parser.add_argument('--smart-mode', action='store_true', help='Run with smarter model')
     args = parser.parse_args()
 
     # --- Client and Model Selection ---

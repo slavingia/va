@@ -1,4 +1,4 @@
-Tools I have written to do my work more effectively at the VA. Code exists to make humans more efficient; not to replace them. All code leads to human review. Feedback appreciated!
+Tools I have written to do stuff more effectively at the VA. Code exists to make humans more efficient; not to replace them. All code leads to human review. Feedback appreciated!
 
 ## Org Charts
 

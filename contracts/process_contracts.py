@@ -28,13 +28,7 @@ if not openai_api_key_azure and not openai_api_key_smart:
     raise ValueError("At least one OpenAI API key (openai_api_key or openai_api_key_smart) must be found in environment variables")
 
 # Try to install pycryptodome if not available
-try:
-    import Crypto
-except ImportError:
-    print("Installing pycryptodome for encrypted PDF support...")
-    import subprocess
-    subprocess.call(['pip', 'install', 'pycryptodome'])
-    print("PyCryptodome installed.")
+# Removed conditional pycryptodome installation - fitz handles encryption differently
 
 # Add a rate limiter class to handle staggered requests
 class StaggeredRateLimiter:
@@ -131,31 +125,6 @@ def get_cached_text_path(pdf_path):
     """Get the path to the cached text file for a PDF"""
     pdf_hash = hashlib.md5(pdf_path.encode()).hexdigest()
     return os.path.join(text_cache_dir, f"{pdf_hash}.txt")
-
-def extract_text_from_pdf_with_cache(pdf_path):
-    """Extract text from a PDF file with caching"""
-    cache_path = get_cached_text_path(pdf_path)
-
-    # Check if cached text exists
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            print(f"Error reading cached text for {pdf_path}: {e}")
-
-    # Extract text if not cached
-    text = extract_text_from_pdf(pdf_path)
-
-    # Cache the extracted text
-    if text:
-        try:
-            with open(cache_path, 'w', encoding='utf-8') as f:
-                f.write(text)
-        except Exception as e:
-            print(f"Error caching text for {pdf_path}: {e}")
-
-    return text
 
 def extract_text_from_pdf(pdf_path):
     """Extract text from a PDF file using pymupdf (much faster than PyPDF2)"""

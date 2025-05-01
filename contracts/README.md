@@ -51,3 +51,34 @@ python analyze_contracts.py
 ```
 
 The script reads `contract_analysis.csv` from the current directory and outputs the analysis file to the same directory. It first provides an analysis of all contracts and then a separate analysis for contracts marked as "munchable".
+
+## Usage: push_to_iffy.py
+
+This script extracts text from PDF files located in the `contracts/pdfs` directory and pushes the content to an IFFY API endpoint for moderation or processing.
+
+**Setup:**
+
+1.  **Environment Variables:** Create a `.env` file within the `contracts` directory. Add the following keys with your specific values:
+    ```dotenv
+    IFFY_API_URL="http://your-iffy-api-url/api/v1/moderate"
+    IFFY_AUTH_TOKEN="iffy_YOUR_TOKEN_HERE"
+    IFFY_CLIENT_ID="your_client_id_here"
+    ```
+2.  **Dependencies:** Install the required Python packages using the `requirements.txt` file located in the `contracts` directory:
+    ```bash
+    # Navigate to the contracts directory if you aren't already there
+    cd contracts
+    pip install -r requirements.txt
+    ```
+3.  **PDF Files:** Place the PDF files you want to process into the `contracts/pdfs` directory.
+
+**Running the Script:**
+
+Execute the script from within the `contracts` directory:
+
+```bash
+# Make sure you are in the contracts directory
+python push_to_iffy.py
+```
+
+The script will iterate through each PDF in `contracts/pdfs`, extract its text content, and send a POST request to the configured IFFY API endpoint. Logs will indicate the progress and any errors encountered.
